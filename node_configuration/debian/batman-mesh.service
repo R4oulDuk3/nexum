@@ -15,7 +15,9 @@ ExecStart=/bin/bash -c '\
     modprobe batman-adv && \
     iw dev @WIRELESS_INTERFACE@ set type ibss && \
     ip link set @WIRELESS_INTERFACE@ up && \
-    iw dev @WIRELESS_INTERFACE@ ibss join @MESH_SSID@ @MESH_FREQ@ HT20 && \
+    (iw dev @WIRELESS_INTERFACE@ ibss join @MESH_SSID@ @MESH_FREQ@ 2>/dev/null || \
+     iw dev @WIRELESS_INTERFACE@ ibss join @MESH_SSID@ @MESH_FREQ@ fixed-freq 2>/dev/null || \
+     iw dev @WIRELESS_INTERFACE@ ibss join @MESH_SSID@ @MESH_FREQ@ HT20) && \
     sleep 2 && \
     batctl if add @WIRELESS_INTERFACE@ && \
     ip link set up dev bat0 && \
