@@ -113,12 +113,43 @@ stop_services() {
     systemctl stop batman-mesh 2>/dev/null || true
     systemctl stop hostapd 2>/dev/null || true
     
-    # Bring down interfaces
+    # Stop NetworkManager from managing the interface
+    if systemctl is-active --quiet NetworkManager 2>/dev/null; then
+        echo "Stopping NetworkManager on $WIRELESS_INTERFACE..."
+        if command -v nmcli &> /dev/null; then
+            nmcli device set "$WIRELESS_INTERFACE" managed no 2>/dev/null || true
+        else
+            echo "Warning: nmcli not found, cannot unmanage interface in NetworkManager"
+            echo "You may need to manually disable NetworkManager for $WIRELESS_INTERFACE"
+        fi
+        # Give NetworkManager time to release the interface
+        sleep 1
+    fi
+    
+    # Kill wpa_supplicant if running on this interface
+    if pgrep -f "wpa_supplicant.*$WIRELESS_INTERFACE" > /dev/null 2>&1; then
+        echo "Stopping wpa_supplicant on $WIRELESS_INTERFACE..."
+        pkill -f "wpa_supplicant.*$WIRELESS_INTERFACE" 2>/dev/null || true
+        sleep 1
+    fi
+    
+    # Bring down interfaces and remove from batman-adv
     ip link set bat0 down 2>/dev/null || true
+    batctl if del "$WIRELESS_INTERFACE" 2>/dev/null || true
+    sleep 1
+    
+    # Bring down AP interface
     ip link set ap0 down 2>/dev/null || true
     iw dev ap0 del 2>/dev/null || true
-    batctl if del "$WIRELESS_INTERFACE" 2>/dev/null || true
+    sleep 1
+    
+    # Bring down and reset wireless interface
+    ip link set "$WIRELESS_INTERFACE" down 2>/dev/null || true
+    iw dev "$WIRELESS_INTERFACE" disconnect 2>/dev/null || true
     iw dev "$WIRELESS_INTERFACE" set type managed 2>/dev/null || true
+    sleep 1
+    
+    echo "Services stopped and interfaces cleaned up"
 }
 
 # Configure batman-adv
@@ -137,18 +168,44 @@ configure_batman() {
         echo "0" > /sys/module/batman_adv/parameters/routing_algo 2>/dev/null || true
     fi
     
+    # Ensure interface is down before changing type
+    ip link set "$WIRELESS_INTERFACE" down 2>/dev/null || true
+    sleep 1
+    
     # Set interface to adhoc mode
-    iw dev "$WIRELESS_INTERFACE" set type ibss
+    echo "Setting interface $WIRELESS_INTERFACE to IBSS mode..."
+    if ! iw dev "$WIRELESS_INTERFACE" set type ibss 2>&1; then
+        echo "Error: Failed to set interface to IBSS mode"
+        echo "The interface may be busy. Try:"
+        echo "  1. sudo nmcli device set $WIRELESS_INTERFACE managed no"
+        echo "  2. sudo pkill -f wpa_supplicant"
+        echo "  3. sudo ip link set $WIRELESS_INTERFACE down"
+        echo "Then run this script again."
+        exit 1
+    fi
+    
+    # Bring interface up
     ip link set "$WIRELESS_INTERFACE" up
+    sleep 1
     
     # Join IBSS network
-    iw dev "$WIRELESS_INTERFACE" ibss join "$MESH_SSID" "$MESH_FREQ" HT20
+    echo "Joining IBSS network: $MESH_SSID on frequency $MESH_FREQ..."
+    if ! iw dev "$WIRELESS_INTERFACE" ibss join "$MESH_SSID" "$MESH_FREQ" HT20 2>&1; then
+        echo "Error: Failed to join IBSS network"
+        echo "Make sure the interface is not in use by another process."
+        exit 1
+    fi
     
     # Wait a moment for IBSS to stabilize
     sleep 2
     
     # Add interface to batman-adv
-    batctl if add "$WIRELESS_INTERFACE"
+    echo "Adding interface to batman-adv..."
+    if ! batctl if add "$WIRELESS_INTERFACE" 2>&1; then
+        echo "Error: Failed to add interface to batman-adv"
+        echo "The interface may already be in use or there's a conflict."
+        exit 1
+    fi
     ip link set up dev bat0
     
     # Configure batman-adv settings for reliability
