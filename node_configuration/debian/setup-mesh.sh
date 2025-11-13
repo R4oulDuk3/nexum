@@ -52,6 +52,40 @@ calculate_ip_from_mac() {
     echo "169.254.$octet3.$octet4"
 }
 
+# Generate 8-digit suffix from MAC address for unique AP SSID
+# Uses all 6 bytes of MAC address to create deterministic 8-digit number
+generate_mac_suffix() {
+    local interface=$1
+    local mac_file="/sys/class/net/$interface/address"
+    
+    if [ ! -f "$mac_file" ]; then
+        # Fallback: use eth0 or wlan0
+        if [ -f "/sys/class/net/eth0/address" ]; then
+            mac_file="/sys/class/net/eth0/address"
+        elif [ -f "/sys/class/net/wlan0/address" ]; then
+            mac_file="/sys/class/net/wlan0/address"
+        else
+            echo "00000000"
+            return 1
+        fi
+    fi
+    
+    # Get MAC address and remove colons
+    local mac=$(cat "$mac_file" | tr -d ':')
+    
+    # Take last 8 hex characters (last 4 bytes) from MAC address
+    # MAC format: aabbccddeeff -> extract "ccddeeff"
+    local last_8_hex="${mac: -8}"
+    
+    # Convert hex to decimal, ensuring we get exactly 8 digits
+    # Use modulo 100000000 to ensure it fits in 8 digits, then pad with leading zeros
+    local decimal=$((0x$last_8_hex))
+    local modulo=$((decimal % 100000000))
+    
+    # Format as 8 digits with leading zeros
+    printf "%08d" "$modulo"
+}
+
 # Detect wireless interface
 detect_wireless_interface() {
     local interfaces=$(iw dev | grep -E "^[[:space:]]*Interface" | awk '{print $2}')
@@ -94,12 +128,44 @@ get_mesh_config() {
     echo "Note: Single radio limitation - AP and mesh may conflict"
     echo ""
     
-    read -p "Enter AP SSID (default: Nexum-Relief, or press Enter to skip AP): " AP_SSID
-    if [ -z "$AP_SSID" ]; then
-        AP_SSID=""
-        AP_ENABLED=false
+    # Detect wireless interface early to generate unique SSID
+    if [ -z "$WIRELESS_INTERFACE" ]; then
+        WIRELESS_INTERFACE=$(detect_wireless_interface)
+        if [ -z "$WIRELESS_INTERFACE" ]; then
+            echo "Warning: Could not detect wireless interface for MAC-based SSID"
+        fi
+    fi
+    
+    # Generate unique SSID suffix from MAC address (8 digits)
+    if [ -n "$WIRELESS_INTERFACE" ]; then
+        MAC_SUFFIX=$(generate_mac_suffix "$WIRELESS_INTERFACE")
+        DEFAULT_AP_SSID="Nexum-Relief-$MAC_SUFFIX"
     else
-        AP_SSID=${AP_SSID:-Nexum-Relief}
+        DEFAULT_AP_SSID="Nexum-Relief"
+        MAC_SUFFIX=""
+    fi
+    
+    read -p "Enter AP SSID (default: $DEFAULT_AP_SSID, or 'no' to skip): " AP_SSID
+    # Trim whitespace
+    AP_SSID=$(echo "$AP_SSID" | xargs)
+    # Convert to lowercase for comparison only
+    AP_SSID_LOWER=$(echo "$AP_SSID" | tr '[:upper:]' '[:lower:]')
+    
+    if [ -z "$AP_SSID" ] || [ "$AP_SSID_LOWER" = "$(echo "$DEFAULT_AP_SSID" | tr '[:upper:]' '[:lower:]')" ] || [ "$AP_SSID_LOWER" = "nexum-relief" ]; then
+        # Default: Enable AP with unique MAC-based SSID
+        AP_SSID="$DEFAULT_AP_SSID"
+        echo "Using unique AP SSID: $AP_SSID (based on MAC address)"
+        read -p "Enter AP password (min 8 chars, default: ReliefNet123): " AP_PASSWORD
+        AP_PASSWORD=${AP_PASSWORD:-ReliefNet123}
+        AP_ENABLED=true
+    elif [ "$AP_SSID_LOWER" = "no" ] || [ "$AP_SSID_LOWER" = "skip" ] || [ "$AP_SSID_LOWER" = "n" ]; then
+        # Explicit skip
+        AP_SSID=""
+        
+        BLED=false
+        echo "AP disabled"
+    else
+        # Custom SSID provided - use as-is (preserve case)
         read -p "Enter AP password (min 8 chars, default: ReliefNet123): " AP_PASSWORD
         AP_PASSWORD=${AP_PASSWORD:-ReliefNet123}
         AP_ENABLED=true
