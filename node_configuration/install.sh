@@ -2,6 +2,11 @@
 # Nexum Mesh Network - Installation Script
 # This script installs all required dependencies for the mesh network
 
+# Ensure this script is run with bash (not sh/dash)
+if [ -z "$BASH_VERSION" ]; then
+    exec /bin/bash "$0" "$@"
+fi
+
 set -e
 
 echo "========================================="
@@ -10,7 +15,7 @@ echo "========================================="
 echo ""
 
 # Check if running as root
-if [ "$EUID" -ne 0 ]; then 
+if [ "$(id -u)" -ne 0 ]; then 
     echo "Please run as root (use sudo)"
     exit 1
 fi

@@ -2,6 +2,12 @@
 # Nexum Mesh Network - Mesh Setup Script
 # This script configures the mesh network on a Raspberry Pi node
 
+# Ensure this script is run with bash (not sh/dash)
+# This check must come before any bash-specific features
+if [ -z "$BASH_VERSION" ]; then
+    exec /bin/bash "$0" "$@"
+fi
+
 set -e
 
 echo "========================================="
@@ -10,7 +16,7 @@ echo "========================================="
 echo ""
 
 # Check if running as root
-if [ "$EUID" -ne 0 ]; then 
+if [ "$(id -u)" -ne 0 ]; then 
     echo "Please run as root (use sudo)"
     exit 1
 fi
@@ -322,9 +328,9 @@ main() {
     echo "  IP addressing: Self-assigned IPv4 link-local (169.254.0.0/16)"
     echo "  DHCP: Disabled (no DHCP server)"
     echo ""
-    read -p "Continue with setup? (y/n): " -n 1 -r
-    echo ""
-    if [[ ! $REPLY =~ ^[Yy]$ ]]; then
+    printf "Continue with setup? (y/n): "
+    read REPLY
+    if [ "$REPLY" != "y" ] && [ "$REPLY" != "Y" ]; then
         echo "Setup cancelled."
         exit 0
     fi
