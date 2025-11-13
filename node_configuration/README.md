@@ -28,6 +28,8 @@ This directory contains scripts and configuration files for setting up Nexum mes
 
 - **install.sh**: Installation script for dependencies and system setup
 - **setup-mesh.sh**: Mesh network configuration script
+- **validate-mesh.sh**: Validation script to check mesh setup status
+- **revert-mesh.sh**: Revert script to restore normal WiFi functionality
 - **hostapd.conf**: Template for WiFi Access Point configuration (optional)
 - **batman-mesh.service**: Systemd service file for batman-adv mesh
 - **SETUP.md**: Detailed setup guide and troubleshooting
@@ -95,9 +97,30 @@ All nodes in the same mesh must use:
 - No DHCP: Clients must manually configure IP addresses in 169.254.0.0/16 range
 - Note: Single radio limitation - AP and mesh may conflict
 
+## Validation
+
+After setup, validate the mesh network configuration:
+
+```bash
+# Run the validation script (recommended)
+sudo chmod +x validate-mesh.sh
+sudo ./validate-mesh.sh
+```
+
+The validation script checks:
+- batman-adv module status
+- bat0 interface and IP address
+- Wireless interface mode (IBSS)
+- batman-adv interface assignment
+- Mesh originators and neighbors
+- Systemd service status
+- IP forwarding
+- iptables rules
+- MAC-based IP calculation
+
 ## Testing
 
-After setup, test the mesh network:
+After validation, test mesh connectivity:
 
 ```bash
 # Check mesh neighbors
@@ -109,19 +132,39 @@ sudo batctl o
 # Check mesh topology
 sudo batctl m
 
-# Ping another node
-ping 169.254.0.2
+# Ping another node (replace with actual IP)
+ping 169.254.X.Y
 ```
+
+## Reverting Mesh Configuration
+
+If you need to restore normal WiFi functionality:
+
+```bash
+sudo chmod +x revert-mesh.sh
+sudo ./revert-mesh.sh
+```
+
+This will:
+- Stop and disable mesh services
+- Remove interface from batman-adv
+- Reset wireless interface to managed mode
+- Re-enable NetworkManager
+- Remove systemd service
+- Clean up mesh configuration
+
+**Note**: After reverting, you may need to manually reconnect to your WiFi network using NetworkManager or `nmcli`.
 
 ## Troubleshooting
 
 See **SETUP.md** for detailed troubleshooting guide.
 
 Common issues:
-1. **AP not starting**: Check single radio limitation above
-2. **Mesh nodes not connecting**: Verify mesh SSID, channel, and frequency match
-3. **IP addresses not assigned**: Check link-local address assignment (see SETUP.md)
-4. **No connectivity**: Verify IP forwarding is enabled and firewall rules are correct
+1. **Lost WiFi connection**: This is expected - the interface is converted to mesh mode. Use `revert-mesh.sh` to restore normal WiFi.
+2. **AP not starting**: Check single radio limitation above
+3. **Mesh nodes not connecting**: Verify mesh SSID, channel, and frequency match
+4. **IP addresses not assigned**: Check link-local address assignment (see SETUP.md)
+5. **No connectivity**: Verify IP forwarding is enabled and firewall rules are correct
 
 ## Deployment
 

@@ -188,12 +188,58 @@ configure_batman() {
     ip link set "$WIRELESS_INTERFACE" up
     sleep 1
     
-    # Join IBSS network
-    echo "Joining IBSS network: $MESH_SSID on frequency $MESH_FREQ..."
+    # Set country code (required for some drivers)
+    if [ -f /sys/class/net/"$WIRELESS_INTERFACE"/phy80211/regdomain ]; then
+        iw reg set US 2>/dev/null || true
+    fi
+    
+    # Calculate frequency from channel if needed, or validate frequency
+    # WiFi 2.4GHz channels: 1=2412, 2=2417, 3=2422, 4=2427, 5=2432, 6=2437, 7=2442, 8=2447, 9=2452, 10=2457, 11=2462
+    CHANNEL_FREQ=""
+    case "$MESH_CHANNEL" in
+        1) CHANNEL_FREQ="2412" ;;
+        2) CHANNEL_FREQ="2417" ;;
+        3) CHANNEL_FREQ="2422" ;;
+        4) CHANNEL_FREQ="2427" ;;
+        5) CHANNEL_FREQ="2432" ;;
+        6) CHANNEL_FREQ="2437" ;;
+        7) CHANNEL_FREQ="2442" ;;
+        8) CHANNEL_FREQ="2447" ;;
+        9) CHANNEL_FREQ="2452" ;;
+        10) CHANNEL_FREQ="2457" ;;
+        11) CHANNEL_FREQ="2462" ;;
+        *) CHANNEL_FREQ="$MESH_FREQ" ;;
+    esac
+    
+    # Use calculated frequency if provided frequency doesn't match channel
+    if [ "$MESH_FREQ" != "$CHANNEL_FREQ" ]; then
+        echo "Warning: Frequency $MESH_FREQ doesn't match channel $MESH_CHANNEL (should be $CHANNEL_FREQ)"
+        echo "Using frequency $CHANNEL_FREQ for channel $MESH_CHANNEL"
+        MESH_FREQ="$CHANNEL_FREQ"
+    fi
+    
+    # Join IBSS network - try different approaches if one fails
+    echo "Joining IBSS network: $MESH_SSID on channel $MESH_CHANNEL (frequency $MESH_FREQ MHz)..."
+    
+    # Try with HT20 first
     if ! iw dev "$WIRELESS_INTERFACE" ibss join "$MESH_SSID" "$MESH_FREQ" HT20 2>&1; then
-        echo "Error: Failed to join IBSS network"
-        echo "Make sure the interface is not in use by another process."
-        exit 1
+        echo "HT20 mode failed, trying without HT mode..."
+        # Try without HT mode
+        if ! iw dev "$WIRELESS_INTERFACE" ibss join "$MESH_SSID" "$MESH_FREQ" 2>&1; then
+            echo "Standard mode failed, trying with fixed channel..."
+            # Try with explicit channel parameter
+            if ! iw dev "$WIRELESS_INTERFACE" ibss join "$MESH_SSID" "$MESH_FREQ" fixed-freq 2>&1; then
+                echo "Error: Failed to join IBSS network with all attempted methods"
+                echo ""
+                echo "Troubleshooting steps:"
+                echo "1. Check if interface supports IBSS mode:"
+                echo "   iw phy | grep -A 10 'Supported interface modes'"
+                echo "2. Verify frequency is valid for your region"
+                echo "3. Try a different channel (1-11)"
+                echo "4. Check if interface is in use: iw dev $WIRELESS_INTERFACE info"
+                exit 1
+            fi
+        fi
     fi
     
     # Wait a moment for IBSS to stabilize
