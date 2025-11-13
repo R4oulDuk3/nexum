@@ -22,7 +22,15 @@ ExecStart=/bin/bash -c '\
     echo 10000 > /sys/class/net/bat0/mesh/orig_interval 2>/dev/null || true && \
     echo 5000 > /sys/class/net/bat0/mesh/bridge_loop_avoidance 2>/dev/null || true && \
     echo 1 > /proc/sys/net/ipv4/ip_forward && \
-    echo 1 > /proc/sys/net/ipv4/conf/bat0/accept_link_local 2>/dev/null || true'
+    echo 1 > /proc/sys/net/ipv4/conf/bat0/accept_link_local 2>/dev/null || true && \
+    MAC=$(cat /sys/class/net/bat0/address 2>/dev/null || cat /sys/class/net/@WIRELESS_INTERFACE@/address 2>/dev/null) && \
+    MAC=$(echo $MAC | tr -d ":") && \
+    LAST_BYTES=${MAC: -4} && \
+    OCTET3=$((0x${LAST_BYTES:0:2})) && \
+    OCTET4=$((0x${LAST_BYTES:2:2})) && \
+    IP="169.254.$OCTET3.$OCTET4" && \
+    ip addr flush dev bat0 2>/dev/null || true && \
+    ip addr add "$IP/16" dev bat0 2>/dev/null || true'
 ExecStop=/bin/bash -c '\
     batctl if del @WIRELESS_INTERFACE@ 2>/dev/null || true && \
     iw dev @WIRELESS_INTERFACE@ set type managed 2>/dev/null || true && \

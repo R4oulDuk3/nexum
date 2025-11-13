@@ -25,6 +25,33 @@ fi
 CONFIG_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 SCRIPT_DIR="$CONFIG_DIR"
 
+# Calculate IP address from MAC address (deterministic self-assignment)
+# Uses last 2 bytes of MAC address for IP octets 3 and 4
+# Range: 169.254.0.0/16 (link-local)
+calculate_ip_from_mac() {
+    local interface=$1
+    local mac_file="/sys/class/net/$interface/address"
+    
+    if [ ! -f "$mac_file" ]; then
+        echo "Error: Cannot find MAC address for interface $interface"
+        return 1
+    fi
+    
+    # Get MAC address and remove colons
+    local mac=$(cat "$mac_file" | tr -d ':')
+    
+    # Extract last 2 bytes (last 4 hex characters)
+    # MAC format: aabbccddeeff -> extract "eeff"
+    local last_bytes="${mac: -4}"
+    
+    # Convert hex to decimal for octet 3 and 4
+    local octet3=$((0x${last_bytes:0:2}))
+    local octet4=$((0x${last_bytes:2:2}))
+    
+    # Construct IP address: 169.254.X.Y
+    echo "169.254.$octet3.$octet4"
+}
+
 # Detect wireless interface
 detect_wireless_interface() {
     local interfaces=$(iw dev | grep -E "^[[:space:]]*Interface" | awk '{print $2}')
@@ -135,10 +162,8 @@ configure_batman() {
     # Wait for interface to be ready
     sleep 2
     
-    # batman-adv will automatically assign IPv4 link-local addresses (169.254.0.0/16)
-    # No manual IP assignment needed - addresses are self-assigned
     echo "batman-adv configured on $WIRELESS_INTERFACE"
-    echo "Mesh interface bat0 will use self-assigned IPv4 link-local addresses (169.254.0.0/16)"
+    echo "Mesh interface bat0 will use MAC-based self-assigned IPv4 address"
 }
 
 # Configure hostapd for access point
@@ -223,30 +248,78 @@ configure_hostapd() {
 # DHCP configuration removed - using self-assigned IPv4 link-local addresses
 # No DHCP server needed as all IPs are self-assigned
 
-# Configure IP addressing (self-assigned IPv4 link-local)
+# Configure IP addressing (MAC-based self-assigned IPv4 link-local)
 configure_network() {
     echo ""
-    echo "Configuring network addressing (self-assigned IPv4)..."
+    echo "Configuring network addressing (MAC-based self-assigned IPv4)..."
     
-    # batman-adv automatically assigns IPv4 link-local addresses (169.254.0.0/16)
-    # No manual IP assignment needed - addresses are self-assigned by the kernel
-    # The bat0 interface will automatically get a link-local address
+    # Calculate IP address from MAC address (deterministic)
+    # Use MAC address from the wireless interface that bat0 is based on
+    if [ -f /sys/class/net/bat0/address ]; then
+        # Try to get MAC from bat0 directly
+        BAT0_IP=$(calculate_ip_from_mac bat0)
+    else
+        # Fall back to wireless interface MAC
+        BAT0_IP=$(calculate_ip_from_mac "$WIRELESS_INTERFACE")
+    fi
     
-    # Enable IPv4 link-local address assignment if not already enabled
+    if [ -z "$BAT0_IP" ]; then
+        echo "Warning: Could not calculate IP from MAC address"
+        echo "Using fallback IP: 169.254.1.1"
+        BAT0_IP="169.254.1.1"
+    fi
+    
+    echo "Calculated IP from MAC address: $BAT0_IP"
+    
+    # Remove any existing IP addresses on bat0
+    ip addr flush dev bat0 2>/dev/null || true
+    
+    # Assign the MAC-based IP address to bat0
+    if ip addr add "$BAT0_IP/16" dev bat0 2>/dev/null; then
+        echo "Assigned IP address $BAT0_IP/16 to bat0 interface"
+    else
+        echo "Warning: Could not assign IP address to bat0 (may already be assigned)"
+        # Try to show current IP
+        ip addr show bat0 | grep "inet " || echo "No IP address found on bat0"
+    fi
+    
+    # Enable IPv4 link-local address acceptance
     if [ -f /proc/sys/net/ipv4/conf/bat0/accept_link_local ]; then
         echo 1 > /proc/sys/net/ipv4/conf/bat0/accept_link_local
     fi
     
-    # Configure AP interface with link-local address (if AP is enabled)
+    # Configure AP interface with MAC-based IP address (if AP is enabled)
     if [ "$AP_ENABLED" = true ]; then
         sleep 2
         if ip addr show ap0 &>/dev/null; then
-            # Enable IPv4 link-local address assignment on AP interface
+            # Calculate AP IP from its MAC address
+            AP_IP=$(calculate_ip_from_mac ap0)
+            
+            if [ -z "$AP_IP" ] || [ "$AP_IP" = "$BAT0_IP" ]; then
+                # Fallback: use bat0 IP + 1 to avoid conflict
+                IFS='.' read -r i1 i2 i3 i4 <<< "$BAT0_IP"
+                i4=$((i4 + 1))
+                if [ $i4 -gt 255 ]; then
+                    i4=1
+                    i3=$((i3 + 1))
+                fi
+                AP_IP="$i1.$i2.$i3.$i4"
+            fi
+            
+            # Remove any existing IP addresses on ap0
+            ip addr flush dev ap0 2>/dev/null || true
+            
+            # Assign MAC-based IP address to ap0
+            if ip addr add "$AP_IP/16" dev ap0 2>/dev/null; then
+                echo "Assigned IP address $AP_IP/16 to ap0 interface"
+            else
+                echo "Warning: Could not assign IP address to ap0"
+            fi
+            
+            # Enable IPv4 link-local address acceptance
             if [ -f /proc/sys/net/ipv4/conf/ap0/accept_link_local ]; then
                 echo 1 > /proc/sys/net/ipv4/conf/ap0/accept_link_local
             fi
-            # The kernel will automatically assign a link-local address
-            echo "AP interface ap0 will use self-assigned IPv4 link-local address"
         else
             echo "Warning: ap0 interface not found. AP may not be enabled."
         fi
@@ -289,7 +362,14 @@ configure_network() {
         netfilter-persistent save 2>/dev/null || true
     fi
     
-    echo "Network addressing configured (self-assigned IPv4 link-local: 169.254.0.0/16)"
+    echo "Network addressing configured (MAC-based self-assigned IPv4: 169.254.0.0/16)"
+    echo "bat0 IP: $BAT0_IP"
+    if [ "$AP_ENABLED" = true ] && [ -n "$AP_IP" ]; then
+        echo "ap0 IP: $AP_IP"
+    fi
+    echo ""
+    echo "Note: IP addresses are calculated from MAC addresses for deterministic assignment"
+    echo "Each node will always get the same IP address based on its MAC address"
 }
 
 # Create systemd service
@@ -325,8 +405,8 @@ main() {
     else
         echo "  AP: Disabled"
     fi
-    echo "  IP addressing: Self-assigned IPv4 link-local (169.254.0.0/16)"
-    echo "  DHCP: Disabled (no DHCP server)"
+    echo "  IP addressing: MAC-based self-assigned IPv4 (169.254.0.0/16)"
+    echo "  DHCP: Disabled (IPs calculated from MAC addresses)"
     echo ""
     printf "Continue with setup? (y/n): "
     read REPLY
@@ -347,12 +427,20 @@ main() {
     echo "========================================="
     echo ""
     echo "Mesh interface: bat0"
-    echo "IP addressing: Self-assigned IPv4 link-local (169.254.0.0/16)"
-    echo "DHCP: Disabled (all IPs are self-assigned)"
+    echo "IP addressing: MAC-based self-assigned IPv4 (169.254.0.0/16)"
+    echo "DHCP: Disabled (IPs calculated from MAC addresses)"
+    echo ""
+    echo "IP addresses are calculated from MAC addresses:"
+    echo "  Algorithm: 169.254.MAC[last-2-bytes-hex-to-decimal]"
+    echo "  Example: MAC aa:bb:cc:dd:ee:ff -> IP 169.254.238.255"
     echo ""
     if [ "$AP_ENABLED" = true ] && [ -n "$AP_SSID" ]; then
         echo "Access Point: $AP_SSID"
-        echo "AP IP: Self-assigned IPv4 link-local (169.254.0.0/16)"
+        if [ -n "$AP_IP" ]; then
+            echo "AP IP: $AP_IP (calculated from MAC address)"
+        else
+            echo "AP IP: MAC-based self-assigned IPv4 (169.254.0.0/16)"
+        fi
         echo "Note: Clients must manually configure IP addresses in 169.254.0.0/16 range"
     else
         echo "Access Point: NOT ENABLED"
