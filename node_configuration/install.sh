@@ -24,7 +24,6 @@ echo "Installing required packages..."
 apt-get install -y \
     batctl \
     hostapd \
-    dnsmasq \
     iptables \
     bridge-utils \
     iw \
@@ -33,21 +32,27 @@ apt-get install -y \
     net-tools \
     iputils-ping
 
-# Load batman-adv module
-echo "Loading batman-adv kernel module..."
-modprobe batman-adv
-
-# Enable batman-adv to load on boot
-if ! grep -q "batman-adv" /etc/modules; then
-    echo "batman-adv" >> /etc/modules
+# Check if batman-adv module is available
+echo "Checking batman-adv kernel module..."
+if modinfo batman-adv &>/dev/null; then
+    echo "batman-adv module found, loading..."
+    modprobe batman-adv
+    
+    # Enable batman-adv to load on boot
+    if ! grep -q "batman-adv" /etc/modules; then
+        echo "batman-adv" >> /etc/modules
+        echo "batman-adv added to /etc/modules (will load on boot)"
+    fi
+else
+    echo "Warning: batman-adv kernel module not found!"
+    echo "This may require a kernel update or building the module."
+    echo "On Raspberry Pi OS, batman-adv should be available by default."
 fi
 
 # Disable conflicting services
 echo "Stopping and disabling conflicting network services..."
 systemctl stop hostapd 2>/dev/null || true
-systemctl stop dnsmasq 2>/dev/null || true
 systemctl disable hostapd 2>/dev/null || true
-systemctl disable dnsmasq 2>/dev/null || true
 
 # Disable NetworkManager on the wireless interface (if present)
 if systemctl is-active --quiet NetworkManager; then

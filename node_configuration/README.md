@@ -28,10 +28,10 @@ This directory contains scripts and configuration files for setting up Nexum mes
 
 - **install.sh**: Installation script for dependencies and system setup
 - **setup-mesh.sh**: Mesh network configuration script
-- **hostapd.conf**: Template for WiFi Access Point configuration
-- **dnsmasq.conf**: Template for DHCP/DNS configuration
+- **hostapd.conf**: Template for WiFi Access Point configuration (optional)
 - **batman-mesh.service**: Systemd service file for batman-adv mesh
 - **SETUP.md**: Detailed setup guide and troubleshooting
+- **HARDWARE.md**: Hardware requirements and specifications
 
 ## Single Radio Limitation
 
@@ -74,9 +74,9 @@ The current scripts attempt to create both a mesh interface and an AP interface 
 ```
 
 - **bat0**: Mesh interface using batman-adv protocol
-- **ap0**: Access Point interface for client devices (if supported)
-- **10.0.0.0/24**: Client network subnet
-- **169.254.0.0/16**: Mesh network subnet (link-local)
+- **ap0**: Access Point interface for client devices (optional, single radio limitation)
+- **169.254.0.0/16**: Self-assigned IPv4 link-local addresses (all interfaces)
+- **No DHCP**: All IP addresses are self-assigned automatically
 
 ## Configuration
 
@@ -87,12 +87,13 @@ All nodes in the same mesh must use:
 - Same Mesh Channel
 - Same Mesh Frequency
 
-### Access Point Settings
+### Access Point Settings (Optional)
 
 - AP SSID: Network name for client devices
 - AP Password: WPA2 password for client devices
-- AP IP: Gateway IP for client devices (default: 10.0.0.1)
-- DHCP Range: IP range for client devices (default: 10.0.0.10-10.0.0.250)
+- IP addressing: Self-assigned IPv4 link-local (169.254.0.0/16)
+- No DHCP: Clients must manually configure IP addresses in 169.254.0.0/16 range
+- Note: Single radio limitation - AP and mesh may conflict
 
 ## Testing
 
@@ -119,7 +120,8 @@ See **SETUP.md** for detailed troubleshooting guide.
 Common issues:
 1. **AP not starting**: Check single radio limitation above
 2. **Mesh nodes not connecting**: Verify mesh SSID, channel, and frequency match
-3. **DHCP not working**: Check dnsmasq logs and firewall rules
+3. **IP addresses not assigned**: Check link-local address assignment (see SETUP.md)
+4. **No connectivity**: Verify IP forwarding is enabled and firewall rules are correct
 
 ## Deployment
 
@@ -138,6 +140,8 @@ Target performance metrics:
 - **Latency**: <500 ms end-to-end RTT
 - **Reliability**: 99% message delivery success rate
 - **Node failure**: Network continues operating with remaining nodes
+- **IP addressing**: Self-assigned IPv4 link-local (169.254.0.0/16)
+- **DHCP**: Disabled (no DHCP server, all IPs self-assigned)
 
 ## Support
 
