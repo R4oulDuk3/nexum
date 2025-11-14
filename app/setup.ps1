@@ -45,6 +45,35 @@ if (-not (Test-Path "data")) {
     New-Item -ItemType Directory -Path "data" | Out-Null
 }
 
+# Build API client if needed
+if (-not (Test-Path "assets\api-client\dist")) {
+    Write-Host "Building API client..." -ForegroundColor Cyan
+    
+    # Check if Node.js is available
+    $nodeAvailable = $false
+    try {
+        $null = Get-Command node -ErrorAction Stop
+        $nodeAvailable = $true
+    } catch {
+        Write-Host "Warning: Node.js not found. Skipping API client build." -ForegroundColor Yellow
+        Write-Host "  Install Node.js from https://nodejs.org/ to build the API client." -ForegroundColor Yellow
+    }
+    
+    if ($nodeAvailable) {
+        Push-Location "assets\api-client"
+        npm install
+        if ($LASTEXITCODE -ne 0) {
+            Write-Host "Warning: Failed to install npm dependencies" -ForegroundColor Yellow
+        } else {
+            npm run build
+            if ($LASTEXITCODE -ne 0) {
+                Write-Host "Warning: Failed to build API client" -ForegroundColor Yellow
+            }
+        }
+        Pop-Location
+    }
+}
+
 Write-Host ""
 Write-Host "Setup complete!" -ForegroundColor Green
 Write-Host ""
