@@ -44,10 +44,54 @@ command_exists() {
     command -v "$1" >/dev/null 2>&1
 }
 
+# Calculate IP address from MAC address
+# Uses last 2 bytes of MAC address for IP octets 3 and 4
+# Default IP range: 169.254.0.0/16 (IPv4 link-local range)
+calculate_ip_from_mac() {
+    local mac=$1
+    local ip_base="${IP_BASE:-169.254.0.0}"
+    
+    # Remove colons and convert to lowercase
+    mac=$(echo "$mac" | tr -d ':' | tr '[:upper:]' '[:lower:]')
+    
+    if [ -z "$mac" ] || [ ${#mac} -ne 12 ]; then
+        echo "unknown"
+        return 1
+    fi
+    
+    # Extract last 2 bytes (last 4 hex characters)
+    local last_bytes="${mac: -4}"
+    
+    # Convert hex to decimal for octet 3 and 4
+    local octet3=$((0x${last_bytes:0:2}))
+    local octet4=$((0x${last_bytes:2:2}))
+    
+    # Extract base network (first two octets) from IP_BASE
+    IFS='.' read -r base_octet1 base_octet2 _ _ <<< "$ip_base"
+    
+    echo "$base_octet1.$base_octet2.$octet3.$octet4"
+}
+
+# Extract MAC address from batctl output line
+# Handles various formats: "   * aa:bb:cc:dd:ee:ff" or "aa:bb:cc:dd:ee:ff [interface]"
+extract_mac_from_line() {
+    local line="$1"
+    # Extract MAC address (format: xx:xx:xx:xx:xx:xx)
+    echo "$line" | grep -oE "([0-9a-fA-F]{2}:){5}[0-9a-fA-F]{2}" | head -n1
+}
+
 # Check if running as root (needed for some batctl commands)
 NEEDS_SUDO=false
 if [ "$(id -u)" -ne 0 ]; then
     NEEDS_SUDO=true
+fi
+
+# Get IP base from bat0 if available, otherwise use default
+if ip addr show bat0 2>/dev/null | grep -q "inet "; then
+    BAT0_IP_FULL=$(ip addr show bat0 | grep "inet " | awk '{print $2}' | head -n1)
+    IP_BASE=$(echo "$BAT0_IP_FULL" | cut -d'/' -f1 | cut -d'.' -f1-2).0.0
+else
+    IP_BASE="169.254.0.0"
 fi
 
 echo "========================================="
@@ -139,14 +183,22 @@ if command_exists batctl; then
     
     if [ -n "$NEIGHBORS" ]; then
         # Count non-empty lines (excluding header)
-        NEIGH_COUNT=$(echo "$NEIGHBORS" | grep -v "^$" | grep -v "^Neighbor" | wc -l)
+        NEIGH_COUNT=$(echo "$NEIGHBORS" | grep -v "^$" | grep -v "^Neighbor" | grep -E "([0-9a-fA-F]{2}:){5}[0-9a-fA-F]{2}" | wc -l)
         
         if [ "$NEIGH_COUNT" -gt 0 ]; then
             print_status "OK" "Found $NEIGH_COUNT direct neighbor(s)"
             echo ""
+            # Print header
+            printf "  %-20s %-18s %-15s\n" "MAC Address" "IP Address" "Interface/Info"
+            echo "  $(printf '=%.0s' {1..55})"
+            
             echo "$NEIGHBORS" | while IFS= read -r line; do
-                if [ -n "$line" ]; then
-                    echo "  $line"
+                MAC=$(extract_mac_from_line "$line")
+                if [ -n "$MAC" ]; then
+                    CALC_IP=$(calculate_ip_from_mac "$MAC")
+                    # Extract interface/info (everything after MAC)
+                    INFO=$(echo "$line" | sed "s/.*$MAC//" | sed 's/^[[:space:]]*//')
+                    printf "  %-20s %-18s %s\n" "$MAC" "$CALC_IP" "$INFO"
                 fi
             done
         else
@@ -171,15 +223,26 @@ if command_exists batctl; then
     fi
     
     if [ -n "$ORIGINATORS" ]; then
-        # Count non-empty lines (excluding header)
-        ORIG_COUNT=$(echo "$ORIGINATORS" | grep -v "^$" | grep -v "^\[B.A.T.M.A.N. adv" | grep -v "^Originator" | wc -l)
+        # Count non-empty lines with MAC addresses (excluding header)
+        ORIG_COUNT=$(echo "$ORIGINATORS" | grep -E "([0-9a-fA-F]{2}:){5}[0-9a-fA-F]{2}" | wc -l)
         
         if [ "$ORIG_COUNT" -gt 0 ]; then
             print_status "OK" "Found $ORIG_COUNT originator(s) in mesh"
             echo ""
+            # Print header
+            printf "  %-20s %-18s %s\n" "MAC Address" "IP Address" "Info"
+            echo "  $(printf '=%.0s' {1..70})"
+            
             echo "$ORIGINATORS" | while IFS= read -r line; do
-                if [ -n "$line" ] && ! echo "$line" | grep -q "^\[B.A.T.M.A.N." && ! echo "$line" | grep -q "^Originator"; then
-                    echo "  $line"
+                MAC=$(extract_mac_from_line "$line")
+                if [ -n "$MAC" ]; then
+                    CALC_IP=$(calculate_ip_from_mac "$MAC")
+                    # Extract info (everything after MAC, clean up)
+                    INFO=$(echo "$line" | sed "s/.*$MAC//" | sed 's/^[[:space:]]*//' | sed 's/[[:space:]]\+/ /g')
+                    # Skip header lines
+                    if ! echo "$line" | grep -q "^\[B.A.T.M.A.N." && ! echo "$line" | grep -q "^Originator"; then
+                        printf "  %-20s %-18s %s\n" "$MAC" "$CALC_IP" "$INFO"
+                    fi
                 fi
             done
         else
@@ -193,8 +256,46 @@ else
     print_status "ERROR" "batctl command not found"
 fi
 
-# 6. Mesh Topology (if available)
-print_section "6. Mesh Topology"
+# 6. ARP Table (Discovered IP Addresses)
+print_section "6. ARP Table (Discovered IP Addresses)"
+
+if ip link show bat0 &>/dev/null; then
+    ARP_ENTRIES=$(ip neigh show dev bat0 2>/dev/null || echo "")
+    
+    if [ -n "$ARP_ENTRIES" ]; then
+        ARP_COUNT=$(echo "$ARP_ENTRIES" | grep -v "^$" | wc -l)
+        
+        if [ "$ARP_COUNT" -gt 0 ]; then
+            print_status "OK" "Found $ARP_COUNT ARP entry/entries on bat0"
+            echo ""
+            printf "  %-18s %-20s %-15s\n" "IP Address" "MAC Address" "State"
+            echo "  $(printf '=%.0s' {1..55})"
+            
+            echo "$ARP_ENTRIES" | while IFS= read -r line; do
+                if [ -n "$line" ]; then
+                    IP=$(echo "$line" | awk '{print $1}')
+                    MAC=$(echo "$line" | grep -oE "([0-9a-fA-F]{2}:){5}[0-9a-fA-F]{2}" || echo "unknown")
+                    STATE=$(echo "$line" | awk '{for(i=3;i<=NF;i++) printf "%s ", $i; print ""}' | sed 's/[[:space:]]*$//')
+                    if [ -z "$STATE" ]; then
+                        STATE="unknown"
+                    fi
+                    printf "  %-18s %-20s %s\n" "$IP" "$MAC" "$STATE"
+                fi
+            done
+        else
+            print_status "WARN" "No ARP entries found on bat0"
+            echo "  ARP entries appear after communication with neighbors"
+            echo "  Try: ping <neighbor_ip> to populate ARP table"
+        fi
+    else
+        print_status "WARN" "Could not query ARP table"
+    fi
+else
+    print_status "WARN" "bat0 interface not available"
+fi
+
+# 7. Mesh Topology (if available)
+print_section "7. Mesh Topology"
 
 if command_exists batctl; then
     if [ "$NEEDS_SUDO" = true ]; then
@@ -216,8 +317,8 @@ else
     print_status "ERROR" "batctl command not found"
 fi
 
-# 7. Wireless Interface Status
-print_section "7. Wireless Interface Status"
+# 8. Wireless Interface Status
+print_section "8. Wireless Interface Status"
 
 # Detect wireless interface
 WIRELESS_INTERFACE=""
@@ -270,8 +371,8 @@ else
     print_status "WARN" "No wireless interface detected"
 fi
 
-# 8. Systemd Service Status
-print_section "8. Mesh Service Status"
+# 9. Systemd Service Status
+print_section "9. Mesh Service Status"
 
 if systemctl list-unit-files 2>/dev/null | grep -q batman-mesh.service; then
     SERVICE_STATUS=$(systemctl is-active batman-mesh 2>/dev/null || echo "inactive")
@@ -295,12 +396,18 @@ fi
 # Summary
 print_section "Summary"
 
+echo "IP Address Information:"
+echo "  • Calculated IPs are shown based on MAC addresses (using last 2 bytes)"
+echo "  • ARP table shows discovered IP addresses after communication"
+echo "  • To discover IPs, ping a neighbor: ping <calculated_ip>"
+echo ""
 echo "To get more detailed information, run:"
-echo "  sudo batctl o    # List all originators"
-echo "  sudo batctl n    # List direct neighbors"
+echo "  sudo batctl o    # List all originators (with MAC addresses)"
+echo "  sudo batctl n    # List direct neighbors (with MAC addresses)"
 echo "  sudo batctl if   # List batman-adv interfaces"
 echo "  sudo batctl m    # Show mesh topology"
 echo "  sudo batctl g    # Show gateways (if configured)"
+echo "  ip neigh show dev bat0  # Show ARP table with discovered IPs"
 echo ""
 echo "For continuous monitoring:"
 echo "  watch -n 2 'sudo batctl n'  # Watch neighbors every 2 seconds"
