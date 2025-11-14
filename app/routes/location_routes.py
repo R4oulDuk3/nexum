@@ -10,10 +10,12 @@ from pathlib import Path
 sys.path.append(str(Path(__file__).parent.parent))
 
 from services.location_service import LocationService
+from services.cluster_service import get_cluster_service
 from models.location import LocationReport, EntityType, GeoLocation
 
 location_bp = Blueprint('location', __name__, url_prefix='/api/locations')
 location_service = LocationService()
+cluster_service = get_cluster_service()
 
 
 @location_bp.route('/', methods=['POST'])
@@ -25,7 +27,7 @@ def add_location():
     {
         "entity_type": "responder",
         "entity_id": "uuid-string",
-        "node_id": "node1",
+        "node_id": "node1",  // optional, will use current node if not provided
         "position": {
             "lat": 52.5200,
             "lon": 13.4050,
@@ -41,10 +43,13 @@ def add_location():
     try:
         data = request.json
         
+        # Use provided node_id or get from cluster service
+        node_id = data.get('node_id') or cluster_service.get_current_node_id()
+        
         report = LocationReport.create_new(
             entity_type=EntityType(data['entity_type']),
             entity_id=UUID(data['entity_id']),
-            node_id=data['node_id'],
+            node_id=node_id,
             position=GeoLocation.from_dict(data['position']),
             metadata=data.get('metadata', {})
         )
@@ -195,5 +200,14 @@ def get_entity_types():
     return jsonify({
         'status': 'success',
         'data': [e.value for e in EntityType]
+    })
+
+
+@location_bp.route('/node-id', methods=['GET'])
+def get_node_id():
+    """Get current node ID"""
+    return jsonify({
+        'status': 'success',
+        'node_id': cluster_service.get_current_node_id()
     })
 

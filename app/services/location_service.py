@@ -12,6 +12,7 @@ import sys
 sys.path.append(str(Path(__file__).parent.parent))
 
 from models.location import LocationReport, EntityType, GeoLocation
+from services.cluster_service import get_cluster_service
 
 
 class LocationService:
@@ -22,6 +23,7 @@ class LocationService:
             # Default to app/data/messaging.db
             db_path = str(Path(__file__).parent.parent / 'data' / 'messaging.db')
         self.db_path = db_path
+        self.cluster_service = get_cluster_service()
         self._init_schema()
     
     def _init_schema(self):
