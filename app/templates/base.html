@@ -13,6 +13,11 @@
     <script type="module" src="{{ url_for('static', filename='location-tracker.js') }}"></script>
     <script type="module" src="{{ url_for('static', filename='header-controls.js') }}"></script>
     
+       <!-- Local Leaflet CSS -->
+    <link rel="stylesheet" href="{{ url_for('static', filename='leaflet.css') }}" />
+    <!-- Local Leaflet JS -->
+    <script src="{{ url_for('static', filename='leaflet.js') }}"></script>
+
     <!-- Custom styles -->
     <style>
         {% block extra_css %}{% endblock %}
