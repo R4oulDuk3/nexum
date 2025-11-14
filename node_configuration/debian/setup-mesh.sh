@@ -136,17 +136,52 @@ echo ""
 # Step 1: Find your Wi-Fi connection name, usually wlan0
 echo "Step 1: Using wireless interface: $WIRELESS_INTERFACE"
 
-# Step 2: Turn off the Wi-Fi to change settings
-echo "Step 2: Turning off Wi-Fi to change settings..."
-ip link set dev "$WIRELESS_INTERFACE" down
+# Step 2: Stop services that might be using the interface
+echo "Step 2: Stopping services that might be using the interface..."
 
-# Step 3: Set wlan0 to ad-hoc mode
+# Stop NetworkManager from managing the interface
+if systemctl is-active --quiet NetworkManager 2>/dev/null; then
+    echo "  Stopping NetworkManager on $WIRELESS_INTERFACE..."
+    if command -v nmcli &> /dev/null; then
+        nmcli device set "$WIRELESS_INTERFACE" managed no 2>/dev/null || true
+    fi
+    # Give NetworkManager time to release the interface
+    sleep 1
+fi
+
+# Kill wpa_supplicant if running on this interface
+if pgrep -f "wpa_supplicant.*$WIRELESS_INTERFACE" > /dev/null 2>&1; then
+    echo "  Stopping wpa_supplicant on $WIRELESS_INTERFACE..."
+    pkill -f "wpa_supplicant.*$WIRELESS_INTERFACE" 2>/dev/null || true
+    sleep 1
+fi
+
+# Disconnect any existing connections
+iw dev "$WIRELESS_INTERFACE" disconnect 2>/dev/null || true
+
+# Step 3: Turn off the Wi-Fi to change settings
+echo "Step 3: Turning off Wi-Fi to change settings..."
+ip link set dev "$WIRELESS_INTERFACE" down
+sleep 1
+
+# Step 4: Set wlan0 to ad-hoc mode
 # All nodes must use the same channel and ESSID (mesh name)
 # The ap address (BSSID) should also be the same
-echo "Step 3: Setting $WIRELESS_INTERFACE to ad-hoc (IBSS) mode..."
+echo "Step 4: Setting $WIRELESS_INTERFACE to ad-hoc (IBSS) mode..."
 
 # Set interface type to IBSS (ad-hoc mode)
-iw dev "$WIRELESS_INTERFACE" set type ibss
+if ! iw dev "$WIRELESS_INTERFACE" set type ibss 2>&1; then
+    echo "Error: Failed to set interface to IBSS mode (device or resource busy)"
+    echo ""
+    echo "The interface may still be in use. Try manually:"
+    echo "  1. sudo nmcli device set $WIRELESS_INTERFACE managed no"
+    echo "  2. sudo pkill -f wpa_supplicant"
+    echo "  3. sudo ip link set $WIRELESS_INTERFACE down"
+    echo "  4. sudo iw dev $WIRELESS_INTERFACE set type ibss"
+    echo ""
+    echo "Then run this script again."
+    exit 1
+fi
 
 # Set country code (required for some drivers to enable channels)
 iw reg set US 2>/dev/null || iw reg set 00 2>/dev/null || true
@@ -157,11 +192,11 @@ echo "  Channel $MESH_CHANNEL = frequency $MESH_FREQ MHz"
 
 # Set the MTU (Maximum Transmission Unit) for wlan0
 # B.A.T.M.A.N.-adv needs a bit more space for its data. 1532 is common.
-echo "Step 4: Setting MTU to $WIRELESS_MTU for B.A.T.M.A.N.-adv compatibility..."
+echo "Step 5: Setting MTU to $WIRELESS_MTU for B.A.T.M.A.N.-adv compatibility..."
 ip link set mtu "$WIRELESS_MTU" dev "$WIRELESS_INTERFACE"
 
 # Turn the Wi-Fi back on
-echo "Step 5: Turning the Wi-Fi back on..."
+echo "Step 6: Turning the Wi-Fi back on..."
 ip link set dev "$WIRELESS_INTERFACE" up
 
 # Wait a second for it to start
@@ -170,7 +205,7 @@ sleep 1
 
 # Join IBSS network with ESSID, frequency, and BSSID
 # Using modern iw command instead of iwconfig
-echo "Step 6: Joining IBSS network..."
+echo "Step 7: Joining IBSS network..."
 echo "  ESSID: $MESH_ESSID"
 echo "  Channel: $MESH_CHANNEL (frequency: $MESH_FREQ MHz)"
 echo "  BSSID: $MESH_BSSID"
@@ -190,9 +225,9 @@ fi
 # Wait a moment for IBSS to stabilize
 sleep 1
 
-# Step 7: Create the bat0 virtual connection
+# Step 8: Create the bat0 virtual connection
 # Your system will use this to talk over the mesh
-echo "Step 7: Creating bat0 virtual interface..."
+echo "Step 8: Creating bat0 virtual interface..."
 if ip link show bat0 &>/dev/null; then
     echo "  bat0 already exists, removing it..."
     ip link set bat0 down 2>/dev/null || true
@@ -202,8 +237,8 @@ if ip link show bat0 &>/dev/null; then
 fi
 ip link add name bat0 type batadv
 
-# Step 8: Add your Wi-Fi (wlan0) to B.A.T.M.A.N.-adv, linking it to bat0
-echo "Step 8: Adding $WIRELESS_INTERFACE to B.A.T.M.A.N.-adv..."
+# Step 9: Add your Wi-Fi (wlan0) to B.A.T.M.A.N.-adv, linking it to bat0
+echo "Step 9: Adding $WIRELESS_INTERFACE to B.A.T.M.A.N.-adv..."
 if ! batctl if add "$WIRELESS_INTERFACE" 2>&1; then
     echo "Error: Failed to add interface to batman-adv"
     echo "Check that:"
@@ -213,17 +248,17 @@ if ! batctl if add "$WIRELESS_INTERFACE" 2>&1; then
     exit 1
 fi
 
-# Step 9: Turn on the bat0 connection
-echo "Step 9: Turning on bat0 connection..."
+# Step 10: Turn on the bat0 connection
+echo "Step 10: Turning on bat0 connection..."
 ip link set up dev bat0
 
 # Waiting a second can help
 echo "Waiting a second for bat0 to stabilize..."
 sleep 1
 
-# Step 10: Give a unique IP address to bat0 on each node
+# Step 11: Give a unique IP address to bat0 on each node
 # These IPs will be in the same group (subnet)
-echo "Step 10: Assigning unique IP address to bat0..."
+echo "Step 11: Assigning unique IP address to bat0..."
 NODE_IP=$(calculate_ip_from_mac "$WIRELESS_INTERFACE")
 echo "  Calculated IP from MAC: $NODE_IP/$IP_CIDR"
 
