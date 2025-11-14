@@ -12,6 +12,23 @@
     <style>
         {% block extra_css %}{% endblock %}
     </style>
+    
+    <!-- Dropdown functionality -->
+    <script>
+        function toggleTestingMenu() {
+            const menu = document.getElementById('testing-menu');
+            menu.classList.toggle('hidden');
+        }
+        
+        // Close dropdown when clicking outside
+        document.addEventListener('click', function(event) {
+            const dropdown = document.getElementById('testing-dropdown');
+            const menu = document.getElementById('testing-menu');
+            if (!dropdown.contains(event.target)) {
+                menu.classList.add('hidden');
+            }
+        });
+    </script>
 </head>
 <body class="bg-gray-50">
     <!-- Navigation -->
@@ -22,7 +39,18 @@
                     <h1 class="text-xl font-bold">Nexum Mesh</h1>
                 </div>
                 <div class="flex items-center space-x-4">
-                    <span class="text-sm">Mesh Messaging</span>
+                    <!-- Testing Dropdown -->
+                    <div class="relative" id="testing-dropdown">
+                        <button onclick="toggleTestingMenu()" class="bg-blue-700 hover:bg-blue-800 text-white px-4 py-2 rounded-md text-sm font-medium flex items-center">
+                            Testing
+                            <svg class="ml-2 h-4 w-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                                <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M19 9l-7 7-7-7"></path>
+                            </svg>
+                        </button>
+                        <div id="testing-menu" class="hidden absolute right-0 mt-2 w-48 bg-white rounded-md shadow-lg py-1 z-50">
+                            <a href="/test/location" class="block px-4 py-2 text-sm text-gray-700 hover:bg-gray-100">Location</a>
+                        </div>
+                    </div>
                 </div>
             </div>
         </div>
