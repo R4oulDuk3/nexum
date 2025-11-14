@@ -5,3 +5,10 @@
 
 # Tailwind CSS
 https://cdn.tailwindcss.com|tailwind.js
+
+# Leaflet - Interactive Maps
+# Note: Leaflet requires an 'images' folder in the same directory as leaflet.css
+# Download the full Leaflet zip from https://github.com/Leaflet/Leaflet/releases/download/v1.9.4/leaflet.zip
+# and extract the 'images' folder to assets/leaflet-images/
+https://unpkg.com/leaflet@1.9.4/dist/leaflet.css|leaflet.css
+https://unpkg.com/leaflet@1.9.4/dist/leaflet.js|leaflet.js

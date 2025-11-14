@@ -24,51 +24,7 @@ class LocationService:
             db_path = str(Path(__file__).parent.parent / 'data' / 'messaging.db')
         self.db_path = db_path
         self.cluster_service = get_cluster_service()
-        self._init_schema()
-    
-    def _init_schema(self):
-        """Create location tables if they don't exist"""
-        conn = sqlite3.connect(self.db_path)
-        cursor = conn.cursor()
-        
-        cursor.execute('''
-            CREATE TABLE IF NOT EXISTS location_reports (
-                id TEXT PRIMARY KEY,
-                entity_type TEXT NOT NULL,
-                entity_id TEXT NOT NULL,
-                node_id TEXT NOT NULL,
-                latitude REAL NOT NULL,
-                longitude REAL NOT NULL,
-                altitude REAL,
-                accuracy REAL,
-                created_at INTEGER NOT NULL,
-                metadata TEXT
-            )
-        ''')
-        
-        # Create indexes for common queries
-        cursor.execute('''
-            CREATE INDEX IF NOT EXISTS idx_entity 
-            ON location_reports(entity_id)
-        ''')
-        
-        cursor.execute('''
-            CREATE INDEX IF NOT EXISTS idx_entity_type 
-            ON location_reports(entity_type)
-        ''')
-        
-        cursor.execute('''
-            CREATE INDEX IF NOT EXISTS idx_created_at 
-            ON location_reports(created_at)
-        ''')
-        
-        cursor.execute('''
-            CREATE INDEX IF NOT EXISTS idx_node 
-            ON location_reports(node_id)
-        ''')
-        
-        conn.commit()
-        conn.close()
+        # Schema is now managed by migrations in app/migrations/
     
     def add_location(self, report: LocationReport) -> LocationReport:
         """
