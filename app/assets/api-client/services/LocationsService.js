@@ -5,7 +5,7 @@ export class LocationsService {
      * Record a new location report
      * Add a location report for an entity (responder, civilian, etc.)
      * @param requestBody
-     * @returns LocationSuccessResponseSchema Location added successfully
+     * @returns any Location added successfully
      * @throws ApiError
      */
     static postApiLocations(requestBody) {
@@ -25,7 +25,7 @@ export class LocationsService {
      * @param entityId Entity UUID
      * @param since UTC milliseconds timestamp (optional)
      * @param limit Maximum number of results (default: 100)
-     * @returns LocationListResponseSchema Location history retrieved successfully
+     * @returns any Location history retrieved successfully
      * @throws ApiError
      */
     static getApiLocationsHistory(entityId, since, limit = 100) {
@@ -49,7 +49,7 @@ export class LocationsService {
      * Retrieve the most recent location report for each entity
      * @param type Filter by entity type (optional)
      * @param limit Maximum number of results (default: 100)
-     * @returns LocationListResponseSchema Latest locations retrieved successfully
+     * @returns any Latest locations retrieved successfully
      * @throws ApiError
      */
     static getApiLocationsLatest(type, limit = 100) {
@@ -69,7 +69,7 @@ export class LocationsService {
      * Find entities near a location
      * Search for entities within a specified radius of a location
      * @param requestBody
-     * @returns NearbyResponseSchema Nearby entities found
+     * @returns any Nearby entities found
      * @throws ApiError
      */
     static postApiLocationsNearby(requestBody) {
@@ -86,7 +86,7 @@ export class LocationsService {
     /**
      * Get current node ID
      * Retrieve the ID of the current mesh node
-     * @returns NodeIdResponseSchema Current node ID
+     * @returns any Current node ID
      * @throws ApiError
      */
     static getApiLocationsNodeId() {
@@ -98,7 +98,7 @@ export class LocationsService {
     /**
      * Get list of valid entity types
      * Retrieve all valid entity type values
-     * @returns EntityTypesResponseSchema List of entity types
+     * @returns any List of entity types
      * @throws ApiError
      */
     static getApiLocationsTypes() {

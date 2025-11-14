@@ -17,8 +17,10 @@ from services.location_service import LocationService
 from services.cluster_service import get_cluster_service
 from models.location import LocationReport, EntityType, GeoLocation
 from schemas.location_schemas import (
+    PositionSchema,
     LocationRequestSchema,
     LocationSuccessResponseSchema,
+    LocationResponseSchema,
     LocationListResponseSchema,
     NearbyRequestSchema,
     NearbyResponseSchema,
@@ -39,6 +41,10 @@ _apispec = APISpec(
 )
 
 # Register all schemas with APISpec once
+# Register nested schemas first (required by schemas that use them)
+_apispec.components.schema('PositionSchema', schema=PositionSchema)
+_apispec.components.schema('LocationResponseSchema', schema=LocationResponseSchema)
+# Register request/response schemas
 _apispec.components.schema('LocationRequestSchema', schema=LocationRequestSchema)
 _apispec.components.schema('LocationSuccessResponseSchema', schema=LocationSuccessResponseSchema)
 _apispec.components.schema('LocationListResponseSchema', schema=LocationListResponseSchema)
@@ -47,11 +53,21 @@ _apispec.components.schema('NearbyResponseSchema', schema=NearbyResponseSchema)
 _apispec.components.schema('EntityTypesResponseSchema', schema=EntityTypesResponseSchema)
 _apispec.components.schema('NodeIdResponseSchema', schema=NodeIdResponseSchema)
 
-# Helper function to convert Marshmallow schema to OpenAPI schema reference
-# This creates a $ref that flasgger can resolve from the registered schemas
-def schema_ref(schema_class):
-    """Return OpenAPI schema reference for a Marshmallow schema class"""
-    return {'$ref': f'#/components/schemas/{schema_class.__name__}'}
+# Helper function to convert Marshmallow schema to OpenAPI dict
+# This extracts the full schema definition from APISpec so Flasgger can include it
+def schema_to_dict(schema_class):
+    """Convert Marshmallow schema to OpenAPI dict that Flasgger understands"""
+    spec_dict = _apispec.to_dict()
+    schema_name = schema_class.__name__
+    
+    # Get the schema definition from APISpec's components
+    if 'components' in spec_dict and 'schemas' in spec_dict['components']:
+        schemas = spec_dict['components']['schemas']
+        if schema_name in schemas:
+            return schemas[schema_name]
+    
+    # Fallback: if schema not found, return a reference (shouldn't happen)
+    return {'$ref': f'#/components/schemas/{schema_name}'}
 
 # Initialize schema instances for validation (used in route handlers)
 location_request_schema = LocationRequestSchema()
@@ -72,7 +88,7 @@ node_id_schema = NodeIdResponseSchema()
         'required': True,
         'content': {
             'application/json': {
-                'schema': schema_ref(LocationRequestSchema)
+                'schema': schema_to_dict(LocationRequestSchema)
             }
         }
     },
@@ -81,7 +97,7 @@ node_id_schema = NodeIdResponseSchema()
             'description': 'Location added successfully',
             'content': {
             'application/json': {
-                'schema': schema_ref(LocationSuccessResponseSchema)
+                'schema': schema_to_dict(LocationSuccessResponseSchema)
             }
             }
         },
@@ -182,7 +198,7 @@ def add_location():
             'description': 'Latest locations retrieved successfully',
             'content': {
                 'application/json': {
-                    'schema': schema_ref(LocationListResponseSchema)
+                    'schema': schema_to_dict(LocationListResponseSchema)
                 }
             }
         },
@@ -270,7 +286,7 @@ def get_latest_locations():
             'description': 'Location history retrieved successfully',
             'content': {
                 'application/json': {
-                    'schema': schema_ref(LocationListResponseSchema)
+                    'schema': schema_to_dict(LocationListResponseSchema)
                 }
             }
         },
@@ -328,7 +344,7 @@ def get_location_history(entity_id):
         'required': True,
         'content': {
             'application/json': {
-                'schema': schema_ref(NearbyRequestSchema)
+                'schema': schema_to_dict(NearbyRequestSchema)
             }
         }
     },
@@ -337,7 +353,7 @@ def get_location_history(entity_id):
             'description': 'Nearby entities found',
             'content': {
             'application/json': {
-                'schema': schema_ref(NearbyResponseSchema)
+                'schema': schema_to_dict(NearbyResponseSchema)
             }
             }
         },
@@ -409,7 +425,7 @@ def get_nearby():
             'description': 'List of entity types',
             'content': {
             'application/json': {
-                'schema': schema_ref(EntityTypesResponseSchema)
+                'schema': schema_to_dict(EntityTypesResponseSchema)
             }
             }
         }
@@ -433,7 +449,7 @@ def get_entity_types():
             'description': 'Current node ID',
             'content': {
             'application/json': {
-                'schema': schema_ref(NodeIdResponseSchema)
+                'schema': schema_to_dict(NodeIdResponseSchema)
             }
             }
         }
