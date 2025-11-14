@@ -11,7 +11,8 @@ from datetime import datetime
 from pathlib import Path
 
 # Initialize Flask app
-app = Flask(__name__)
+# Configure static files to be served from 'assets' directory
+app = Flask(__name__, static_folder='assets', static_url_path='/assets')
 app.config['SECRET_KEY'] = os.environ.get('SECRET_KEY', 'dev-secret-key-change-in-production')
 app.config['DATABASE'] = os.path.join(os.path.dirname(__file__), 'data', 'messaging.db')
 

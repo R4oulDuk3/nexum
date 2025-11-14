@@ -1,0 +1,7 @@
+# Downloads configuration file
+# Format: URL|FILENAME
+# Lines starting with # are comments and will be ignored
+# Empty lines are ignored
+
+# Tailwind CSS
+https://cdn.tailwindcss.com|tailwind.js
