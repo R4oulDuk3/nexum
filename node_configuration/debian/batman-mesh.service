@@ -1,0 +1,45 @@
+# Nexum Mesh Network - Systemd Service
+# This service manages the batman-adv mesh network
+# Variables are replaced by setup-mesh.sh: @WIRELESS_INTERFACE@, @MESH_SSID@, @MESH_FREQ@, @SCRIPT_DIR@
+
+[Unit]
+Description=BATMAN-adv Mesh Network
+After=network.target
+Wants=network.target
+
+[Service]
+Type=oneshot
+RemainAfterExit=yes
+ExecStartPre=/sbin/modprobe batman-adv
+ExecStart=/bin/bash -c '\
+    modprobe batman-adv && \
+    iw dev @WIRELESS_INTERFACE@ set type ibss && \
+    ip link set @WIRELESS_INTERFACE@ up && \
+    (iw dev @WIRELESS_INTERFACE@ ibss join @MESH_SSID@ @MESH_FREQ@ 2>/dev/null || \
+     iw dev @WIRELESS_INTERFACE@ ibss join @MESH_SSID@ @MESH_FREQ@ fixed-freq 2>/dev/null || \
+     iw dev @WIRELESS_INTERFACE@ ibss join @MESH_SSID@ @MESH_FREQ@ HT20) && \
+    sleep 2 && \
+    batctl if add @WIRELESS_INTERFACE@ && \
+    ip link set up dev bat0 && \
+    echo 10000 > /sys/class/net/bat0/mesh/orig_interval 2>/dev/null || true && \
+    echo 5000 > /sys/class/net/bat0/mesh/bridge_loop_avoidance 2>/dev/null || true && \
+    echo 1 > /proc/sys/net/ipv4/ip_forward && \
+    echo 1 > /proc/sys/net/ipv4/conf/bat0/accept_link_local 2>/dev/null || true && \
+    MAC=$(cat /sys/class/net/bat0/address 2>/dev/null || cat /sys/class/net/@WIRELESS_INTERFACE@/address 2>/dev/null) && \
+    MAC=$(echo $MAC | tr -d ":") && \
+    LAST_BYTES=${MAC: -4} && \
+    OCTET3=$((0x${LAST_BYTES:0:2})) && \
+    OCTET4=$((0x${LAST_BYTES:2:2})) && \
+    IP="169.254.$OCTET3.$OCTET4" && \
+    ip addr flush dev bat0 2>/dev/null || true && \
+    ip addr add "$IP/16" dev bat0 2>/dev/null || true'
+ExecStop=/bin/bash -c '\
+    batctl if del @WIRELESS_INTERFACE@ 2>/dev/null || true && \
+    iw dev @WIRELESS_INTERFACE@ set type managed 2>/dev/null || true && \
+    ip link set bat0 down 2>/dev/null || true'
+Restart=on-failure
+RestartSec=10
+
+[Install]
+WantedBy=multi-user.target
+
