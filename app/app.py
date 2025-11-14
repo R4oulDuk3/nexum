@@ -15,6 +15,10 @@ app = Flask(__name__)
 app.config['SECRET_KEY'] = os.environ.get('SECRET_KEY', 'dev-secret-key-change-in-production')
 app.config['DATABASE'] = os.path.join(os.path.dirname(__file__), 'data', 'messaging.db')
 
+# Register blueprints
+from routes.location_routes import location_bp
+app.register_blueprint(location_bp)
+
 # Ensure data directory exists
 DATA_DIR = os.path.join(os.path.dirname(__file__), 'data')
 os.makedirs(DATA_DIR, exist_ok=True)
@@ -77,6 +81,12 @@ def init_db():
 def index():
     """Main dashboard"""
     return render_template('dashboard.html')
+
+
+@app.route('/test/location')
+def test_location():
+    """Location service test page"""
+    return render_template('location_test.html')
 
 
 @app.route('/api/health')

@@ -1,0 +1,391 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Location Service Test - Nexum</title>
+    <script src="https://cdn.tailwindcss.com"></script>
+</head>
+<body class="bg-gray-50">
+    <!-- Navigation -->
+    <nav class="bg-blue-600 text-white shadow-lg">
+        <div class="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8">
+            <div class="flex justify-between h-16">
+                <div class="flex items-center">
+                    <a href="/" class="text-xl font-bold">Nexum Mesh</a>
+                    <span class="ml-4 text-sm">Location Service Test</span>
+                </div>
+                <div class="flex items-center space-x-4">
+                    <a href="/" class="text-sm hover:text-blue-200">Dashboard</a>
+                </div>
+            </div>
+        </div>
+    </nav>
+
+    <main class="max-w-7xl mx-auto py-6 sm:px-6 lg:px-8">
+        <div class="px-4 py-6 sm:px-0">
+            
+            <!-- Header -->
+            <div class="mb-8">
+                <h2 class="text-3xl font-bold text-gray-900">Location Service Test</h2>
+                <p class="mt-2 text-sm text-gray-600">Test location tracking and queries for disaster relief operations</p>
+            </div>
+
+            <div class="grid grid-cols-1 lg:grid-cols-2 gap-6">
+                
+                <!-- LEFT COLUMN: Forms -->
+                <div class="space-y-6">
+                    
+                    <!-- Add Location Form -->
+                    <div class="bg-white shadow rounded-lg p-6">
+                        <h3 class="text-lg font-medium text-gray-900 mb-4">Add Location Report</h3>
+                        <form id="addLocationForm" class="space-y-4">
+                            <div>
+                                <label class="block text-sm font-medium text-gray-700">Entity Type</label>
+                                <select id="entityType" class="mt-1 block w-full rounded-md border-gray-300 shadow-sm p-2 border">
+                                    <option value="responder">Responder</option>
+                                    <option value="civilian">Civilian</option>
+                                    <option value="incident">Incident</option>
+                                    <option value="resource">Resource</option>
+                                    <option value="hazard">Hazard</option>
+                                </select>
+                            </div>
+                            
+                            <div>
+                                <label class="block text-sm font-medium text-gray-700">Entity Name</label>
+                                <input type="text" id="entityName" class="mt-1 block w-full rounded-md border-gray-300 shadow-sm p-2 border" placeholder="e.g., Medic Team Alpha">
+                            </div>
+                            
+                            <div class="grid grid-cols-2 gap-4">
+                                <div>
+                                    <label class="block text-sm font-medium text-gray-700">Latitude</label>
+                                    <input type="number" step="0.000001" id="latitude" class="mt-1 block w-full rounded-md border-gray-300 shadow-sm p-2 border" value="52.5200">
+                                </div>
+                                <div>
+                                    <label class="block text-sm font-medium text-gray-700">Longitude</label>
+                                    <input type="number" step="0.000001" id="longitude" class="mt-1 block w-full rounded-md border-gray-300 shadow-sm p-2 border" value="13.4050">
+                                </div>
+                            </div>
+                            
+                            <div>
+                                <label class="block text-sm font-medium text-gray-700">Node ID</label>
+                                <input type="text" id="nodeId" class="mt-1 block w-full rounded-md border-gray-300 shadow-sm p-2 border" value="node1">
+                            </div>
+                            
+                            <button type="submit" class="w-full bg-blue-600 text-white py-2 px-4 rounded-md hover:bg-blue-700">
+                                Add Location
+                            </button>
+                        </form>
+                        <div id="addResult" class="mt-4"></div>
+                    </div>
+
+                    <!-- Query Latest Locations -->
+                    <div class="bg-white shadow rounded-lg p-6">
+                        <h3 class="text-lg font-medium text-gray-900 mb-4">Query Latest Locations</h3>
+                        <form id="queryLatestForm" class="space-y-4">
+                            <div>
+                                <label class="block text-sm font-medium text-gray-700">Filter by Type (optional)</label>
+                                <select id="queryType" class="mt-1 block w-full rounded-md border-gray-300 shadow-sm p-2 border">
+                                    <option value="">All Types</option>
+                                    <option value="responder">Responder</option>
+                                    <option value="civilian">Civilian</option>
+                                    <option value="incident">Incident</option>
+                                    <option value="resource">Resource</option>
+                                    <option value="hazard">Hazard</option>
+                                </select>
+                            </div>
+                            
+                            <div>
+                                <label class="block text-sm font-medium text-gray-700">Limit</label>
+                                <input type="number" id="queryLimit" class="mt-1 block w-full rounded-md border-gray-300 shadow-sm p-2 border" value="10">
+                            </div>
+                            
+                            <button type="submit" class="w-full bg-green-600 text-white py-2 px-4 rounded-md hover:bg-green-700">
+                                Get Latest Locations
+                            </button>
+                        </form>
+                    </div>
+
+                    <!-- Query Nearby -->
+                    <div class="bg-white shadow rounded-lg p-6">
+                        <h3 class="text-lg font-medium text-gray-900 mb-4">Find Nearby Entities</h3>
+                        <form id="queryNearbyForm" class="space-y-4">
+                            <div class="grid grid-cols-2 gap-4">
+                                <div>
+                                    <label class="block text-sm font-medium text-gray-700">Center Latitude</label>
+                                    <input type="number" step="0.000001" id="nearbyLat" class="mt-1 block w-full rounded-md border-gray-300 shadow-sm p-2 border" value="52.5200">
+                                </div>
+                                <div>
+                                    <label class="block text-sm font-medium text-gray-700">Center Longitude</label>
+                                    <input type="number" step="0.000001" id="nearbyLon" class="mt-1 block w-full rounded-md border-gray-300 shadow-sm p-2 border" value="13.4050">
+                                </div>
+                            </div>
+                            
+                            <div>
+                                <label class="block text-sm font-medium text-gray-700">Radius (km)</label>
+                                <input type="number" step="0.1" id="nearbyRadius" class="mt-1 block w-full rounded-md border-gray-300 shadow-sm p-2 border" value="5">
+                            </div>
+                            
+                            <div>
+                                <label class="block text-sm font-medium text-gray-700">Filter by Type (optional)</label>
+                                <select id="nearbyType" class="mt-1 block w-full rounded-md border-gray-300 shadow-sm p-2 border">
+                                    <option value="">All Types</option>
+                                    <option value="responder">Responder</option>
+                                    <option value="civilian">Civilian</option>
+                                    <option value="incident">Incident</option>
+                                    <option value="resource">Resource</option>
+                                    <option value="hazard">Hazard</option>
+                                </select>
+                            </div>
+                            
+                            <button type="submit" class="w-full bg-purple-600 text-white py-2 px-4 rounded-md hover:bg-purple-700">
+                                Find Nearby
+                            </button>
+                        </form>
+                    </div>
+
+                    <!-- Quick Actions -->
+                    <div class="bg-white shadow rounded-lg p-6">
+                        <h3 class="text-lg font-medium text-gray-900 mb-4">Quick Actions</h3>
+                        <div class="space-y-2">
+                            <button onclick="generateTestData()" class="w-full bg-yellow-600 text-white py-2 px-4 rounded-md hover:bg-yellow-700">
+                                Generate Test Data
+                            </button>
+                            <button onclick="getCurrentLocation()" class="w-full bg-indigo-600 text-white py-2 px-4 rounded-md hover:bg-indigo-700">
+                                Use My Location
+                            </button>
+                        </div>
+                    </div>
+                </div>
+
+                <!-- RIGHT COLUMN: Results -->
+                <div class="space-y-6">
+                    
+                    <!-- Results Display -->
+                    <div class="bg-white shadow rounded-lg p-6">
+                        <h3 class="text-lg font-medium text-gray-900 mb-4">Results</h3>
+                        <div id="results" class="space-y-4">
+                            <p class="text-gray-500 text-sm">Results will appear here...</p>
+                        </div>
+                    </div>
+
+                    <!-- Map Placeholder -->
+                    <div class="bg-white shadow rounded-lg p-6">
+                        <h3 class="text-lg font-medium text-gray-900 mb-4">Map View</h3>
+                        <div class="bg-gray-100 rounded-lg h-64 flex items-center justify-center">
+                            <p class="text-gray-500">Map integration coming soon...</p>
+                        </div>
+                    </div>
+                </div>
+            </div>
+        </div>
+    </main>
+
+    <script>
+        // Generate random UUID
+        function generateUUID() {
+            return 'xxxxxxxx-xxxx-4xxx-yxxx-xxxxxxxxxxxx'.replace(/[xy]/g, function(c) {
+                var r = Math.random() * 16 | 0, v = c == 'x' ? r : (r & 0x3 | 0x8);
+                return v.toString(16);
+            });
+        }
+
+        // Add Location
+        document.getElementById('addLocationForm').addEventListener('submit', async (e) => {
+            e.preventDefault();
+            
+            const data = {
+                entity_type: document.getElementById('entityType').value,
+                entity_id: generateUUID(),
+                node_id: document.getElementById('nodeId').value,
+                position: {
+                    lat: parseFloat(document.getElementById('latitude').value),
+                    lon: parseFloat(document.getElementById('longitude').value)
+                },
+                metadata: {
+                    name: document.getElementById('entityName').value || 'Unnamed',
+                    status: 'active',
+                    timestamp: new Date().toISOString()
+                }
+            };
+            
+            try {
+                const response = await fetch('/api/locations/', {
+                    method: 'POST',
+                    headers: {'Content-Type': 'application/json'},
+                    body: JSON.stringify(data)
+                });
+                
+                const result = await response.json();
+                
+                if (response.ok) {
+                    document.getElementById('addResult').innerHTML = 
+                        '<div class="bg-green-100 text-green-800 p-3 rounded"><strong>Success!</strong> Location added.</div>';
+                    displayResults([result.data], 'Location Added');
+                } else {
+                    document.getElementById('addResult').innerHTML = 
+                        '<div class="bg-red-100 text-red-800 p-3 rounded"><strong>Error:</strong> ' + result.message + '</div>';
+                }
+            } catch (error) {
+                document.getElementById('addResult').innerHTML = 
+                    '<div class="bg-red-100 text-red-800 p-3 rounded"><strong>Error:</strong> ' + error.message + '</div>';
+            }
+            
+            setTimeout(() => {
+                document.getElementById('addResult').innerHTML = '';
+            }, 3000);
+        });
+
+        // Query Latest Locations
+        document.getElementById('queryLatestForm').addEventListener('submit', async (e) => {
+            e.preventDefault();
+            
+            const type = document.getElementById('queryType').value;
+            const limit = document.getElementById('queryLimit').value;
+            
+            let url = `/api/locations/latest?limit=${limit}`;
+            if (type) url += `&type=${type}`;
+            
+            try {
+                const response = await fetch(url);
+                const result = await response.json();
+                
+                if (response.ok) {
+                    displayResults(result.data, `Latest Locations (${result.count} found)`);
+                } else {
+                    showError(result.message);
+                }
+            } catch (error) {
+                showError(error.message);
+            }
+        });
+
+        // Query Nearby
+        document.getElementById('queryNearbyForm').addEventListener('submit', async (e) => {
+            e.preventDefault();
+            
+            const data = {
+                center: {
+                    lat: parseFloat(document.getElementById('nearbyLat').value),
+                    lon: parseFloat(document.getElementById('nearbyLon').value)
+                },
+                radius_km: parseFloat(document.getElementById('nearbyRadius').value),
+                entity_type: document.getElementById('nearbyType').value || null
+            };
+            
+            try {
+                const response = await fetch('/api/locations/nearby', {
+                    method: 'POST',
+                    headers: {'Content-Type': 'application/json'},
+                    body: JSON.stringify(data)
+                });
+                
+                const result = await response.json();
+                
+                if (response.ok) {
+                    displayResults(result.data, `Nearby Entities (${result.count} found within ${data.radius_km}km)`);
+                } else {
+                    showError(result.message);
+                }
+            } catch (error) {
+                showError(error.message);
+            }
+        });
+
+        // Display results
+        function displayResults(data, title) {
+            const resultsDiv = document.getElementById('results');
+            
+            if (!data || data.length === 0) {
+                resultsDiv.innerHTML = '<p class="text-gray-500">No results found.</p>';
+                return;
+            }
+            
+            let html = `<h4 class="font-semibold text-gray-900 mb-3">${title}</h4>`;
+            html += '<div class="space-y-3">';
+            
+            data.forEach(item => {
+                const date = new Date(item.created_at).toLocaleString();
+                html += `
+                    <div class="border border-gray-200 rounded-lg p-4">
+                        <div class="flex justify-between items-start mb-2">
+                            <span class="inline-flex items-center px-2.5 py-0.5 rounded-full text-xs font-medium bg-blue-100 text-blue-800">
+                                ${item.entity_type}
+                            </span>
+                            <span class="text-xs text-gray-500">${date}</span>
+                        </div>
+                        <div class="text-sm space-y-1">
+                            <div><strong>Name:</strong> ${item.metadata.name || 'N/A'}</div>
+                            <div><strong>Position:</strong> ${item.position.lat.toFixed(6)}, ${item.position.lon.toFixed(6)}</div>
+                            <div><strong>Node:</strong> ${item.node_id}</div>
+                            <div><strong>Entity ID:</strong> <span class="text-xs font-mono">${item.entity_id}</span></div>
+                        </div>
+                    </div>
+                `;
+            });
+            
+            html += '</div>';
+            resultsDiv.innerHTML = html;
+        }
+
+        // Show error
+        function showError(message) {
+            const resultsDiv = document.getElementById('results');
+            resultsDiv.innerHTML = `<div class="bg-red-100 text-red-800 p-4 rounded">${message}</div>`;
+        }
+
+        // Generate test data
+        async function generateTestData() {
+            const testEntities = [
+                { type: 'responder', name: 'Medic Team Alpha', lat: 52.5200, lon: 13.4050 },
+                { type: 'responder', name: 'Fire Brigade Beta', lat: 52.5210, lon: 13.4060 },
+                { type: 'civilian', name: 'Person needing help', lat: 52.5220, lon: 13.4070 },
+                { type: 'resource', name: 'Emergency Shelter', lat: 52.5180, lon: 13.4020 },
+                { type: 'incident', name: 'Building Collapse', lat: 52.5190, lon: 13.4030 },
+                { type: 'hazard', name: 'Flood Zone', lat: 52.5230, lon: 13.4080 }
+            ];
+            
+            for (const entity of testEntities) {
+                const data = {
+                    entity_type: entity.type,
+                    entity_id: generateUUID(),
+                    node_id: 'test-node',
+                    position: { lat: entity.lat, lon: entity.lon },
+                    metadata: { name: entity.name, status: 'test' }
+                };
+                
+                await fetch('/api/locations/', {
+                    method: 'POST',
+                    headers: {'Content-Type': 'application/json'},
+                    body: JSON.stringify(data)
+                });
+            }
+            
+            alert('Test data generated! Click "Get Latest Locations" to see results.');
+        }
+
+        // Get current location
+        function getCurrentLocation() {
+            if (navigator.geolocation) {
+                navigator.geolocation.getCurrentPosition((position) => {
+                    document.getElementById('latitude').value = position.coords.latitude;
+                    document.getElementById('longitude').value = position.coords.longitude;
+                    document.getElementById('nearbyLat').value = position.coords.latitude;
+                    document.getElementById('nearbyLon').value = position.coords.longitude;
+                    alert('Location updated!');
+                }, (error) => {
+                    alert('Could not get your location: ' + error.message);
+                });
+            } else {
+                alert('Geolocation is not supported by your browser');
+            }
+        }
+
+        // Load latest on page load
+        window.addEventListener('load', () => {
+            document.getElementById('queryLatestForm').dispatchEvent(new Event('submit'));
+        });
+    </script>
+</body>
+</html>
+
