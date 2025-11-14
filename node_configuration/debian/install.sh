@@ -29,6 +29,7 @@ echo "Installing required packages..."
 apt-get install -y \
     batctl \
     hostapd \
+    dnsmasq \
     iptables \
     bridge-utils \
     iw \
