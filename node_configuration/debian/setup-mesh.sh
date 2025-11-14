@@ -27,8 +27,8 @@ MESH_CHANNEL="${MESH_CHANNEL:-6}"
 # Default: 02:CA:FF:EE:BA:BE (from guide)
 MESH_BSSID="${MESH_BSSID:-02:CA:FF:EE:BA:BE}"
 
-# MTU for wireless interface (B.A.T.M.A.N.-adv needs larger MTU)
-WIRELESS_MTU="${WIRELESS_MTU:-1532}"
+# MTU for wireless interface (using standard 1500, B.A.T.M.A.N.-adv works fine with this)
+WIRELESS_MTU="${WIRELESS_MTU:-1500}"
 
 # IP address range for bat0 (format: base_network/subnet_bits)
 # Default: 169.254.0.0/16 (IPv4 link-local range)
@@ -191,9 +191,11 @@ MESH_FREQ=$(channel_to_frequency "$MESH_CHANNEL")
 echo "  Channel $MESH_CHANNEL = frequency $MESH_FREQ MHz"
 
 # Set the MTU (Maximum Transmission Unit) for wlan0
-# B.A.T.M.A.N.-adv needs a bit more space for its data. 1532 is common.
-echo "Step 5: Setting MTU to $WIRELESS_MTU for B.A.T.M.A.N.-adv compatibility..."
-ip link set mtu "$WIRELESS_MTU" dev "$WIRELESS_INTERFACE"
+# Using standard MTU 1500 (B.A.T.M.A.N.-adv works fine with this)
+echo "Step 5: Setting MTU to $WIRELESS_MTU..."
+ip link set mtu "$WIRELESS_MTU" dev "$WIRELESS_INTERFACE" 2>/dev/null || {
+    echo "  Warning: Failed to set MTU, using device default"
+}
 
 # Turn the Wi-Fi back on
 echo "Step 6: Turning the Wi-Fi back on..."
