@@ -9,6 +9,8 @@
  * - user_role: User role (defaults to "responder" if not set)
  */
 
+import { LocationsService, ApiError } from './api-client/index.js';
+
 /**
  * Generate a UUID v4
  * @returns {string} UUID string
@@ -156,31 +158,39 @@ async function sendLocation(options = {}) {
             metadata: metadata
         };
 
-        // Send to server
-        const response = await fetch('/api/locations/', {
-            method: 'POST',
-            headers: {
-                'Content-Type': 'application/json'
-            },
-            body: JSON.stringify(data)
-        });
+        // Send to server using generated API client
+        const result = await LocationsService.postApiLocations(data);
 
-        const result = await response.json();
-
-        if (response.ok) {
-            console.log('Location sent successfully:', result.data);
-            return {
-                success: true,
-                data: result.data
-            };
-        } else {
-            throw new Error(result.message || 'Failed to send location');
-        }
+        // The API returns { status: 'success', data: {...} }
+        const locationData = result.data || result;
+        console.log('Location sent successfully:', locationData);
+        return {
+            success: true,
+            data: locationData
+        };
     } catch (error) {
         console.error('Error sending location:', error);
+        
+        // Handle ApiError from generated client
+        if (error instanceof ApiError) {
+            let errorMessage = error.message;
+            // Try to extract message from error body if available
+            if (error.body) {
+                if (typeof error.body === 'object' && error.body.message) {
+                    errorMessage = error.body.message;
+                } else if (typeof error.body === 'string') {
+                    errorMessage = error.body;
+                }
+            }
+            return {
+                success: false,
+                error: errorMessage
+            };
+        }
+        
         return {
             success: false,
-            error: error.message
+            error: error.message || 'Failed to send location'
         };
     }
 }
