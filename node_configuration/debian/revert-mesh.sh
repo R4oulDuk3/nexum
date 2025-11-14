@@ -63,10 +63,12 @@ revert_mesh() {
     fi
     
     # Step 3: Bring down bat0 and remove if exists
-    echo "3. Bringing down mesh interface..."
+    echo "3. Removing mesh interface..."
     if ip link show bat0 &>/dev/null; then
         ip link set bat0 down 2>/dev/null || true
-        echo "   ✓ bat0 interface brought down"
+        batctl if del "$WIRELESS_INTERFACE" 2>/dev/null || true
+        ip link del bat0 2>/dev/null || true
+        echo "   ✓ bat0 interface removed"
     fi
     
     # Step 4: Remove virtual AP interface
@@ -90,7 +92,10 @@ revert_mesh() {
         # Set interface back to managed mode
         iw dev "$WIRELESS_INTERFACE" set type managed 2>/dev/null || true
         
-        echo "   ✓ Interface reset to managed mode"
+        # Reset MTU back to default (1500) - setup script sets it to 1532
+        ip link set mtu 1500 dev "$WIRELESS_INTERFACE" 2>/dev/null || true
+        
+        echo "   ✓ Interface reset to managed mode (MTU reset to 1500)"
         
         # Step 6: Re-enable NetworkManager for the interface
         echo "6. Re-enabling NetworkManager..."
