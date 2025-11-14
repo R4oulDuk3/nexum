@@ -11,8 +11,8 @@
  * - Page visibility detection
  */
 
-// Ensure location-sender.js is loaded first
-// This script should be included after location-sender.js
+// Import LocationSender module
+import * as LocationSender from './location-sender.js';
 
 /**
  * Location Tracker class
@@ -67,10 +67,6 @@ class LocationTracker {
      * @returns {Promise<Object>} Result from sendLocation
      */
     async sendLocationOnce() {
-        if (typeof LocationSender === 'undefined') {
-            throw new Error('LocationSender not loaded. Make sure location-sender.js is loaded first.');
-        }
-
         const result = await LocationSender.sendLocation();
 
         if (result.success) {
@@ -257,7 +253,20 @@ function resumeLocationTracking() {
     }
 }
 
-// Export for use in other scripts
+// Export as ES6 module
+export {
+    LocationTracker,
+    getDefaultTracker,
+    startLocationTracking,
+    stopLocationTracking,
+    pauseLocationTracking,
+    resumeLocationTracking
+};
+
+// Export default tracker class
+export default LocationTracker;
+
+// Keep window exports for backward compatibility (optional)
 if (typeof window !== 'undefined') {
     window.LocationTracker = LocationTracker;
     window.getDefaultTracker = getDefaultTracker;

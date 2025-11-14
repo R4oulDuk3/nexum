@@ -8,6 +8,10 @@
  * - Auto-restore broadcast state on page load
  */
 
+// Import dependencies
+import * as LocationSender from './location-sender.js';
+import { LocationTracker } from './location-tracker.js';
+
 // Constants for localStorage keys
 const STORAGE_KEYS = {
     BROADCASTING: 'location_broadcasting',
@@ -40,10 +44,7 @@ function setBroadcastingState(enabled) {
  * @returns {string} User type ('responder' or 'civilian')
  */
 function getUserType() {
-    if (typeof LocationSender !== 'undefined') {
-        return LocationSender.getUserRole();
-    }
-    return localStorage.getItem(STORAGE_KEYS.USER_TYPE) || 'responder';
+    return LocationSender.getUserRole();
 }
 
 /**
@@ -51,11 +52,7 @@ function getUserType() {
  * @param {string} userType - User type ('responder' or 'civilian')
  */
 function setUserType(userType) {
-    if (typeof LocationSender !== 'undefined') {
-        LocationSender.setUserRole(userType);
-    } else {
-        localStorage.setItem(STORAGE_KEYS.USER_TYPE, userType);
-    }
+    LocationSender.setUserRole(userType);
 }
 
 /**
@@ -100,12 +97,6 @@ function updateBroadcastButton(isBroadcasting) {
 function startBroadcasting() {
     if (headerTracker && headerTracker.isTracking) {
         console.log('Broadcasting already started');
-        return;
-    }
-    
-    if (typeof LocationTracker === 'undefined') {
-        console.error('LocationTracker not loaded');
-        alert('Location tracking not available. Please refresh the page.');
         return;
     }
     
@@ -233,7 +224,33 @@ if (typeof document !== 'undefined') {
     window.addEventListener('beforeunload', cleanupHeaderControls);
 }
 
-// Export functions for global access
+// Export as ES6 module
+export {
+    startBroadcasting,
+    stopBroadcasting,
+    toggleBroadcasting,
+    isBroadcastingEnabled,
+    setBroadcastingState,
+    getUserType,
+    setUserType,
+    updateBroadcastButton,
+    initializeHeaderControls
+};
+
+// Export default object
+export default {
+    startBroadcasting,
+    stopBroadcasting,
+    toggleBroadcasting,
+    isBroadcastingEnabled,
+    setBroadcastingState,
+    getUserType,
+    setUserType,
+    updateBroadcastButton,
+    initializeHeaderControls
+};
+
+// Keep window export for backward compatibility (optional)
 if (typeof window !== 'undefined') {
     window.HeaderControls = {
         startBroadcasting,

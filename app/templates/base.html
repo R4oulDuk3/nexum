@@ -8,10 +8,10 @@
     <!-- Tailwind CSS (local) -->
     <script src="{{ url_for('static', filename='tailwind.js') }}"></script>
     
-    <!-- Location tracking scripts (loaded early for header controls) -->
-    <script src="{{ url_for('static', filename='location-sender.js') }}"></script>
-    <script src="{{ url_for('static', filename='location-tracker.js') }}"></script>
-    <script src="{{ url_for('static', filename='header-controls.js') }}"></script>
+    <!-- Location tracking scripts (loaded as ES6 modules) -->
+    <script type="module" src="{{ url_for('static', filename='location-sender.js') }}"></script>
+    <script type="module" src="{{ url_for('static', filename='location-tracker.js') }}"></script>
+    <script type="module" src="{{ url_for('static', filename='header-controls.js') }}"></script>
     
     <!-- Custom styles -->
     <style>
@@ -19,16 +19,17 @@
     </style>
     
     <!-- Mobile drawer and dropdown functionality -->
-    <script>
-        // Mobile drawer state
-        let drawerOpen = false;
+    <script type="module">
+        // Import HeaderControls module
+        import * as HeaderControls from "{{ url_for('static', filename='header-controls.js') }}";
         
-        function toggleMobileDrawer() {
+        // Make functions globally available for onclick handlers
+        window.toggleMobileDrawer = function() {
             const drawer = document.getElementById('mobile-drawer');
             const backdrop = document.getElementById('drawer-backdrop');
-            drawerOpen = !drawerOpen;
+            window.drawerOpen = !window.drawerOpen;
             
-            if (drawerOpen) {
+            if (window.drawerOpen) {
                 drawer.classList.remove('-translate-x-full');
                 backdrop.classList.remove('hidden');
                 document.body.classList.add('overflow-hidden');
@@ -37,14 +38,17 @@
                 backdrop.classList.add('hidden');
                 document.body.classList.remove('overflow-hidden');
             }
-        }
+        };
         
-        function toggleTestingMenu() {
+        window.toggleTestingMenu = function() {
             const menu = document.getElementById('testing-menu');
             if (menu) {
                 menu.classList.toggle('hidden');
             }
-        }
+        };
+        
+        // Initialize drawer state
+        window.drawerOpen = false;
         
         // Close drawer when clicking backdrop
         document.addEventListener('click', function(event) {
@@ -52,7 +56,7 @@
             const drawer = document.getElementById('mobile-drawer');
             
             if (event.target === backdrop) {
-                toggleMobileDrawer();
+                window.toggleMobileDrawer();
             }
             
             // Close dropdown when clicking outside
@@ -65,8 +69,8 @@
         
         // Close drawer on escape key
         document.addEventListener('keydown', function(event) {
-            if (event.key === 'Escape' && drawerOpen) {
-                toggleMobileDrawer();
+            if (event.key === 'Escape' && window.drawerOpen) {
+                window.toggleMobileDrawer();
             }
         });
         
@@ -84,9 +88,7 @@
                 // Sync from mobile to header
                 mobileSwitch.addEventListener('change', function() {
                     headerSwitch.value = this.value;
-                    if (typeof HeaderControls !== 'undefined' && HeaderControls.setUserType) {
-                        HeaderControls.setUserType(this.value);
-                    }
+                    HeaderControls.setUserType(this.value);
                 });
             }
         });

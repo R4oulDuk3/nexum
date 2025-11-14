@@ -185,21 +185,32 @@ async function sendLocation(options = {}) {
     }
 }
 
-// Export functions for use in other scripts or service workers
-if (typeof module !== 'undefined' && module.exports) {
-    // Node.js/CommonJS
-    module.exports = {
-        sendLocation,
-        getUserUUID,
-        getUserRole,
-        setUserRole,
-        getUserName,
-        setUserName,
-        getCurrentPosition,
-        generateUUID
-    };
-} else if (typeof window !== 'undefined') {
-    // Browser - attach to window for global access
+// Export functions as ES6 module
+export {
+    sendLocation,
+    getUserUUID,
+    getUserRole,
+    setUserRole,
+    getUserName,
+    setUserName,
+    getCurrentPosition,
+    generateUUID
+};
+
+// Also export as default object for convenience
+export default {
+    sendLocation,
+    getUserUUID,
+    getUserRole,
+    setUserRole,
+    getUserName,
+    setUserName,
+    getCurrentPosition,
+    generateUUID
+};
+
+// Keep window export for backward compatibility (optional)
+if (typeof window !== 'undefined') {
     window.LocationSender = {
         sendLocation,
         getUserUUID,
