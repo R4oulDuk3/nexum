@@ -48,13 +48,19 @@ app.config['SWAGGER'] = {
         {
             'name': 'health',
             'description': 'Health check endpoints'
+        },
+        {
+            'name': 'sync',
+            'description': 'Mesh node synchronization endpoints'
         }
     ]
 }
 
 # Register blueprints FIRST (before Swagger initialization)
 from routes.location_routes import location_bp, _apispec
+from routes.sync_routes import sync_bp
 app.register_blueprint(location_bp)
+app.register_blueprint(sync_bp)
 
 # Get schema components from APISpec
 # This registers all Marshmallow schemas with Swagger automatically
