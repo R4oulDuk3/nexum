@@ -1,28 +1,8 @@
-<!DOCTYPE html>
-<html lang="en">
-<head>
-    <meta charset="UTF-8">
-    <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Location Service Test - Nexum</title>
-    <script src="{{ url_for('static', filename='tailwind.js') }}"></script>
-</head>
-<body class="bg-gray-50">
-    <!-- Navigation -->
-    <nav class="bg-blue-600 text-white shadow-lg">
-        <div class="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8">
-            <div class="flex justify-between h-16">
-                <div class="flex items-center">
-                    <a href="/" class="text-xl font-bold">Nexum Mesh</a>
-                    <span class="ml-4 text-sm">Location Service Test</span>
-                </div>
-                <div class="flex items-center space-x-4">
-                    <a href="/" class="text-sm hover:text-blue-200">Dashboard</a>
-                </div>
-            </div>
-        </div>
-    </nav>
+{% extends "base.html" %}
 
-    <main class="max-w-7xl mx-auto py-6 sm:px-6 lg:px-8">
+{% block title %}Location Service Test - Nexum{% endblock %}
+
+{% block content %}
         <div class="px-4 py-6 sm:px-0">
             
             <!-- Header -->
@@ -160,6 +140,34 @@
                             <button onclick="getCurrentLocation()" class="w-full bg-indigo-600 text-white py-2 px-4 rounded-md hover:bg-indigo-700">
                                 Use My Location
                             </button>
+                        </div>
+                    </div>
+
+                    <!-- Auto Location Tracking -->
+                    <div class="bg-white shadow rounded-lg p-6">
+                        <h3 class="text-lg font-medium text-gray-900 mb-4">Auto Location Tracking</h3>
+                        <div class="space-y-2">
+                            <div class="flex items-center justify-between mb-2">
+                                <span class="text-sm text-gray-700">User Role:</span>
+                                <select id="userRoleSelect" onchange="updateUserRole()" class="text-sm border border-gray-300 rounded px-2 py-1">
+                                    <option value="responder">Responder</option>
+                                    <option value="civilian">Civilian</option>
+                                    <option value="resource">Resource</option>
+                                </select>
+                            </div>
+                            <div class="text-xs text-gray-500 mb-3">
+                                <div>User UUID: <span id="userUuidDisplay" class="font-mono text-xs"></span></div>
+                            </div>
+                            <button onclick="startAutoTracking()" id="startTrackingBtn" class="w-full bg-green-600 text-white py-2 px-4 rounded-md hover:bg-green-700">
+                                Start Auto Tracking (5s)
+                            </button>
+                            <button onclick="stopAutoTracking()" id="stopTrackingBtn" class="w-full bg-red-600 text-white py-2 px-4 rounded-md hover:bg-red-700 hidden">
+                                Stop Auto Tracking
+                            </button>
+                            <button onclick="sendLocationOnce()" class="w-full bg-blue-600 text-white py-2 px-4 rounded-md hover:bg-blue-700">
+                                Send Location Once
+                            </button>
+                            <div id="trackingStatus" class="text-xs text-gray-500 mt-2"></div>
                         </div>
                     </div>
                 </div>
@@ -434,11 +442,115 @@
             }
         }
 
+        // Auto Location Tracking Functions
+        let locationTracker = null;
+
+        function updateUserRole() {
+            const role = document.getElementById('userRoleSelect').value;
+            if (typeof LocationSender !== 'undefined') {
+                LocationSender.setUserRole(role);
+                console.log('User role updated to:', role);
+            }
+        }
+
+        function startAutoTracking() {
+            if (typeof LocationTracker === 'undefined' || typeof LocationSender === 'undefined') {
+                alert('Location tracking scripts not loaded!');
+                return;
+            }
+
+            // Create tracker instance (5 second interval)
+            locationTracker = new LocationTracker(5000);
+            
+            // Start tracking with callbacks
+            locationTracker.start(
+                (data) => {
+                    // Success callback
+                    console.log('Location shared:', data);
+                    updateTrackingStatus('Tracking active - Last sent: ' + new Date().toLocaleTimeString());
+                    document.getElementById('addResult').innerHTML = 
+                        '<div class="bg-green-100 text-green-800 p-3 rounded text-sm">Location shared at ' + new Date().toLocaleTimeString() + '</div>';
+                    setTimeout(() => {
+                        document.getElementById('addResult').innerHTML = '';
+                    }, 2000);
+                },
+                (error) => {
+                    // Error callback
+                    console.error('Location sharing error:', error);
+                    updateTrackingStatus('Error: ' + error);
+                }
+            );
+
+            // Update UI
+            document.getElementById('startTrackingBtn').classList.add('hidden');
+            document.getElementById('stopTrackingBtn').classList.remove('hidden');
+            updateTrackingStatus('Tracking active...');
+        }
+
+        function stopAutoTracking() {
+            if (locationTracker) {
+                locationTracker.stop();
+                locationTracker = null;
+            }
+
+            // Update UI
+            document.getElementById('startTrackingBtn').classList.remove('hidden');
+            document.getElementById('stopTrackingBtn').classList.add('hidden');
+            updateTrackingStatus('Tracking stopped');
+        }
+
+        async function sendLocationOnce() {
+            if (typeof LocationSender === 'undefined') {
+                alert('Location sender not loaded!');
+                return;
+            }
+
+            try {
+                const result = await LocationSender.sendLocation();
+                if (result.success) {
+                    document.getElementById('addResult').innerHTML = 
+                        '<div class="bg-green-100 text-green-800 p-3 rounded"><strong>Success!</strong> Location sent.</div>';
+                    displayResults([result.data], 'Location Sent');
+                } else {
+                    document.getElementById('addResult').innerHTML = 
+                        '<div class="bg-red-100 text-red-800 p-3 rounded"><strong>Error:</strong> ' + result.error + '</div>';
+                }
+            } catch (error) {
+                document.getElementById('addResult').innerHTML = 
+                    '<div class="bg-red-100 text-red-800 p-3 rounded"><strong>Error:</strong> ' + error.message + '</div>';
+            }
+
+            setTimeout(() => {
+                document.getElementById('addResult').innerHTML = '';
+            }, 3000);
+        }
+
+        function updateTrackingStatus(message) {
+            const statusDiv = document.getElementById('trackingStatus');
+            if (statusDiv) {
+                statusDiv.textContent = message;
+            }
+        }
+
         // Load latest on page load (call function directly with default parameters)
         window.addEventListener('load', function() {
             queryLatestLocations(null, 10);
+            
+            // Display user UUID if LocationSender is loaded
+            if (typeof LocationSender !== 'undefined') {
+                const userUuid = LocationSender.getUserUUID();
+                const userRole = LocationSender.getUserRole();
+                document.getElementById('userUuidDisplay').textContent = userUuid;
+                document.getElementById('userRoleSelect').value = userRole;
+            }
+        });
+
+        // Stop tracking when page unloads
+        window.addEventListener('beforeunload', function() {
+            if (locationTracker) {
+                locationTracker.stop();
+            }
         });
     </script>
-</body>
-</html>
+{% endblock %}
 

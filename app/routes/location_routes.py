@@ -3,6 +3,10 @@ Location tracking API routes
 """
 
 from flask import Blueprint, request, jsonify
+from flasgger import swag_from
+from marshmallow import ValidationError
+from apispec import APISpec
+from apispec.ext.marshmallow import MarshmallowPlugin
 from uuid import UUID
 import sys
 from pathlib import Path
@@ -12,43 +16,116 @@ sys.path.append(str(Path(__file__).parent.parent))
 from services.location_service import LocationService
 from services.cluster_service import get_cluster_service
 from models.location import LocationReport, EntityType, GeoLocation
+from schemas.location_schemas import (
+    LocationRequestSchema,
+    LocationSuccessResponseSchema,
+    LocationListResponseSchema,
+    NearbyRequestSchema,
+    NearbyResponseSchema,
+    EntityTypesResponseSchema,
+    NodeIdResponseSchema
+)
 
 location_bp = Blueprint('location', __name__, url_prefix='/api/locations')
 location_service = LocationService()
 cluster_service = get_cluster_service()
 
+# Create APISpec instance for schema conversion
+_apispec = APISpec(
+    title='Nexum Mesh API',
+    version='1.0.0',
+    openapi_version='3.0.0',
+    plugins=[MarshmallowPlugin()]
+)
+
+# Register all schemas with APISpec once
+_apispec.components.schema('LocationRequestSchema', schema=LocationRequestSchema)
+_apispec.components.schema('LocationSuccessResponseSchema', schema=LocationSuccessResponseSchema)
+_apispec.components.schema('LocationListResponseSchema', schema=LocationListResponseSchema)
+_apispec.components.schema('NearbyRequestSchema', schema=NearbyRequestSchema)
+_apispec.components.schema('NearbyResponseSchema', schema=NearbyResponseSchema)
+_apispec.components.schema('EntityTypesResponseSchema', schema=EntityTypesResponseSchema)
+_apispec.components.schema('NodeIdResponseSchema', schema=NodeIdResponseSchema)
+
+# Helper function to convert Marshmallow schema to OpenAPI schema reference
+# This creates a $ref that flasgger can resolve from the registered schemas
+def schema_ref(schema_class):
+    """Return OpenAPI schema reference for a Marshmallow schema class"""
+    return {'$ref': f'#/components/schemas/{schema_class.__name__}'}
+
+# Initialize schema instances for validation (used in route handlers)
+location_request_schema = LocationRequestSchema()
+location_response_schema = LocationSuccessResponseSchema()
+location_list_schema = LocationListResponseSchema()
+nearby_request_schema = NearbyRequestSchema()
+nearby_response_schema = NearbyResponseSchema()
+entity_types_schema = EntityTypesResponseSchema()
+node_id_schema = NodeIdResponseSchema()
+
 
 @location_bp.route('/', methods=['POST'])
-def add_location():
-    """
-    Record a new location report
-    
-    Expected JSON:
-    {
-        "entity_type": "responder",
-        "entity_id": "uuid-string",
-        "node_id": "node1",  // optional, will use current node if not provided
-        "position": {
-            "lat": 52.5200,
-            "lon": 13.4050,
-            "alt": 100.0,  // optional
-            "accuracy": 10.0  // optional
+@swag_from({
+    'tags': ['locations'],
+    'summary': 'Record a new location report',
+    'description': 'Add a location report for an entity (responder, civilian, etc.)',
+    'requestBody': {
+        'required': True,
+        'content': {
+            'application/json': {
+                'schema': schema_ref(LocationRequestSchema)
+            }
+        }
+    },
+    'responses': {
+        201: {
+            'description': 'Location added successfully',
+            'content': {
+            'application/json': {
+                'schema': schema_ref(LocationSuccessResponseSchema)
+            }
+            }
         },
-        "metadata": {  // optional
-            "name": "Team Alpha",
-            "status": "active"
+        400: {
+            'description': 'Invalid request data',
+            'content': {
+                'application/json': {
+                    'schema': {
+                        'type': 'object',
+                        'properties': {
+                            'status': {'type': 'string', 'example': 'error'},
+                            'message': {'type': 'string', 'example': 'Invalid request data'}
+                        }
+                    }
+                }
+            }
         }
     }
-    """
+})
+def add_location():
+    """Record a new location report"""
     try:
-        data = request.json
+        # Validate and deserialize request
+        errors = location_request_schema.validate(request.json)
+        if errors:
+            return jsonify({
+                'status': 'error',
+                'message': f'Validation error: {errors}'
+            }), 400
+        
+        data = location_request_schema.load(request.json)
         
         # Use provided node_id or get from cluster service
         node_id = data.get('node_id') or cluster_service.get_current_node_id()
         
+        # Marshmallow already deserializes UUID fields to UUID objects
+        # So data['entity_id'] is already a UUID object, not a string
+        entity_id = data['entity_id']
+        if isinstance(entity_id, str):
+            entity_id = UUID(entity_id)
+        
         report = LocationReport.create_new(
             entity_type=EntityType(data['entity_type']),
-            entity_id=UUID(data['entity_id']),
+            entity_id=entity_id,
             node_id=node_id,
             position=GeoLocation.from_dict(data['position']),
             metadata=data.get('metadata', {})
@@ -74,16 +151,59 @@ def add_location():
 
 
 @location_bp.route('/latest', methods=['GET'])
+@swag_from({
+    'tags': ['locations'],
+    'summary': 'Get latest location for each entity',
+    'description': 'Retrieve the most recent location report for each entity',
+    'parameters': [
+        {
+            'name': 'type',
+            'in': 'query',
+            'schema': {
+                'type': 'string',
+                'enum': ['responder', 'civilian', 'incident', 'resource', 'hazard']
+            },
+            'description': 'Filter by entity type (optional)',
+            'required': False
+        },
+        {
+            'name': 'limit',
+            'in': 'query',
+            'schema': {
+                'type': 'integer',
+                'default': 100
+            },
+            'description': 'Maximum number of results (default: 100)',
+            'required': False
+        }
+    ],
+    'responses': {
+        200: {
+            'description': 'Latest locations retrieved successfully',
+            'content': {
+                'application/json': {
+                    'schema': schema_ref(LocationListResponseSchema)
+                }
+            }
+        },
+        400: {
+            'description': 'Invalid parameter',
+            'content': {
+                'application/json': {
+                    'schema': {
+                        'type': 'object',
+                        'properties': {
+                            'status': {'type': 'string', 'example': 'error'},
+                            'message': {'type': 'string'}
+                        }
+                    }
+                }
+            }
+        }
+    }
+})
 def get_latest_locations():
-    """
-    Get latest location for each entity
-    
-    Query params:
-    - type: Filter by entity type (optional)
-    - limit: Maximum number of results (default: 100)
-    
-    Example: /api/locations/latest?type=responder&limit=50
-    """
+    """Get latest location for each entity"""
     try:
         entity_type = request.args.get('type')
         limit = int(request.args.get('limit', 100))
@@ -110,16 +230,68 @@ def get_latest_locations():
 
 
 @location_bp.route('/history/<entity_id>', methods=['GET'])
+@swag_from({
+    'tags': ['locations'],
+    'summary': 'Get location history for an entity',
+    'description': 'Retrieve location history for a specific entity',
+    'parameters': [
+        {
+            'name': 'entity_id',
+            'in': 'path',
+            'required': True,
+            'schema': {
+                'type': 'string',
+                'format': 'uuid'
+            },
+            'description': 'Entity UUID'
+        },
+        {
+            'name': 'since',
+            'in': 'query',
+            'required': False,
+            'schema': {
+                'type': 'integer'
+            },
+            'description': 'UTC milliseconds timestamp (optional)'
+        },
+        {
+            'name': 'limit',
+            'in': 'query',
+            'required': False,
+            'schema': {
+                'type': 'integer',
+                'default': 100
+            },
+            'description': 'Maximum number of results (default: 100)'
+        }
+    ],
+    'responses': {
+        200: {
+            'description': 'Location history retrieved successfully',
+            'content': {
+                'application/json': {
+                    'schema': schema_ref(LocationListResponseSchema)
+                }
+            }
+        },
+        400: {
+            'description': 'Invalid UUID or parameter',
+            'content': {
+                'application/json': {
+                    'schema': {
+                        'type': 'object',
+                        'properties': {
+                            'status': {'type': 'string', 'example': 'error'},
+                            'message': {'type': 'string'}
+                        }
+                    }
+                }
+            }
+        }
+    }
+})
 def get_location_history(entity_id):
-    """
-    Get location history for an entity
-    
-    Query params:
-    - since: UTC milliseconds timestamp (optional)
-    - limit: Maximum number of results (default: 100)
-    
-    Example: /api/locations/history/uuid-string?since=1234567890000&limit=50
-    """
+    """Get location history for an entity"""
     try:
         since = request.args.get('since', type=int)
         limit = int(request.args.get('limit', 100))
@@ -148,22 +320,55 @@ def get_location_history(entity_id):
 
 
 @location_bp.route('/nearby', methods=['POST'])
-def get_nearby():
-    """
-    Find entities near a location
-    
-    Expected JSON:
-    {
-        "center": {
-            "lat": 52.5200,
-            "lon": 13.4050
+@swag_from({
+    'tags': ['locations'],
+    'summary': 'Find entities near a location',
+    'description': 'Search for entities within a specified radius of a location',
+    'requestBody': {
+        'required': True,
+        'content': {
+            'application/json': {
+                'schema': schema_ref(NearbyRequestSchema)
+            }
+        }
+    },
+    'responses': {
+        200: {
+            'description': 'Nearby entities found',
+            'content': {
+            'application/json': {
+                'schema': schema_ref(NearbyResponseSchema)
+            }
+            }
         },
-        "radius_km": 5.0,
-        "entity_type": "resource"  // optional
+        400: {
+            'description': 'Invalid request data',
+            'content': {
+                'application/json': {
+                    'schema': {
+                        'type': 'object',
+                        'properties': {
+                            'status': {'type': 'string', 'example': 'error'},
+                            'message': {'type': 'string'}
+                        }
+                    }
+                }
+            }
+        }
     }
-    """
+})
+def get_nearby():
+    """Find entities near a location"""
     try:
-        data = request.json
+        # Validate request
+        errors = nearby_request_schema.validate(request.json)
+        if errors:
+            return jsonify({
+                'status': 'error',
+                'message': f'Validation error: {errors}'
+            }), 400
+        
+        data = nearby_request_schema.load(request.json)
         
         center = GeoLocation.from_dict(data['center'])
         radius_km = float(data['radius_km'])
@@ -195,6 +400,21 @@ def get_nearby():
 
 
 @location_bp.route('/types', methods=['GET'])
+@swag_from({
+    'tags': ['locations'],
+    'summary': 'Get list of valid entity types',
+    'description': 'Retrieve all valid entity type values',
+    'responses': {
+        200: {
+            'description': 'List of entity types',
+            'content': {
+            'application/json': {
+                'schema': schema_ref(EntityTypesResponseSchema)
+            }
+            }
+        }
+    }
+})
 def get_entity_types():
     """Get list of valid entity types"""
     return jsonify({
@@ -204,6 +424,21 @@ def get_entity_types():
 
 
 @location_bp.route('/node-id', methods=['GET'])
+@swag_from({
+    'tags': ['locations'],
+    'summary': 'Get current node ID',
+    'description': 'Retrieve the ID of the current mesh node',
+    'responses': {
+        200: {
+            'description': 'Current node ID',
+            'content': {
+            'application/json': {
+                'schema': schema_ref(NodeIdResponseSchema)
+            }
+            }
+        }
+    }
+})
 def get_node_id():
     """Get current node ID"""
     return jsonify({

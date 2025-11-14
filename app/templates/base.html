@@ -8,6 +8,11 @@
     <!-- Tailwind CSS (local) -->
     <script src="{{ url_for('static', filename='tailwind.js') }}"></script>
     
+    <!-- Location tracking scripts (loaded early for header controls) -->
+    <script src="{{ url_for('static', filename='location-sender.js') }}"></script>
+    <script src="{{ url_for('static', filename='location-tracker.js') }}"></script>
+    <script src="{{ url_for('static', filename='header-controls.js') }}"></script>
+    
     <!-- Custom styles -->
     <style>
         {% block extra_css %}{% endblock %}
@@ -39,6 +44,23 @@
                     <h1 class="text-xl font-bold">Nexum Mesh</h1>
                 </div>
                 <div class="flex items-center space-x-4">
+                    <!-- User Type Switch -->
+                    <div class="flex items-center space-x-2">
+                        <span class="text-sm">User Type:</span>
+                        <select id="headerUserTypeSwitch" class="bg-blue-700 hover:bg-blue-800 text-white px-3 py-1 rounded-md text-sm border-none cursor-pointer focus:outline-none focus:ring-2 focus:ring-blue-300">
+                            <option value="responder">Responder</option>
+                            <option value="civilian">Civilian</option>
+                        </select>
+                    </div>
+                    
+                    <!-- Broadcast Button -->
+                    <button id="headerBroadcastBtn" class="bg-green-600 hover:bg-green-700 text-white px-4 py-2 rounded-md text-sm font-medium flex items-center">
+                        <svg id="broadcastIcon" class="mr-2 h-4 w-4" fill="currentColor" viewBox="0 0 24 24">
+                            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M15.536 8.464a5 5 0 010 7.072m2.828-9.9a9 9 0 010 12.728M5.586 15H4a1 1 0 01-1-1v-4a1 1 0 011-1h1.586l4.707-4.707C10.923 3.663 12 4.109 12 5v14c0 .891-1.077 1.337-1.707.707L5.586 15z"></path>
+                        </svg>
+                        <span id="broadcastBtnText">Start Broadcasting</span>
+                    </button>
+                    
                     <!-- Testing Dropdown -->
                     <div class="relative" id="testing-dropdown">
                         <button onclick="toggleTestingMenu()" class="bg-blue-700 hover:bg-blue-800 text-white px-4 py-2 rounded-md text-sm font-medium flex items-center">

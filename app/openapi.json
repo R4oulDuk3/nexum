@@ -1,0 +1,607 @@
+{
+  "components": {
+    "schemas": {
+      "EntityTypesResponseSchema": {
+        "properties": {
+          "data": {
+            "description": "List of valid entity types",
+            "example": [
+              "responder",
+              "civilian",
+              "incident",
+              "resource",
+              "hazard"
+            ],
+            "items": {
+              "enum": [
+                "responder",
+                "civilian",
+                "incident",
+                "resource",
+                "hazard"
+              ],
+              "type": "string"
+            },
+            "type": "array"
+          },
+          "status": {
+            "description": "Response status",
+            "example": "success",
+            "type": "string"
+          }
+        },
+        "type": "object"
+      },
+      "LocationListResponseSchema": {
+        "properties": {
+          "count": {
+            "description": "Number of locations",
+            "example": 10,
+            "type": "integer"
+          },
+          "data": {
+            "description": "List of locations",
+            "items": {
+              "$ref": "#/components/schemas/LocationResponse"
+            },
+            "type": "array"
+          },
+          "status": {
+            "description": "Response status",
+            "example": "success",
+            "type": "string"
+          }
+        },
+        "type": "object"
+      },
+      "LocationRequestSchema": {
+        "properties": {
+          "entity_id": {
+            "description": "Unique identifier for the entity",
+            "example": "550e8400-e29b-41d4-a716-446655440000",
+            "format": "uuid",
+            "type": "string"
+          },
+          "entity_type": {
+            "description": "Type of entity",
+            "enum": [
+              "responder",
+              "civilian",
+              "incident",
+              "resource",
+              "hazard"
+            ],
+            "example": "responder",
+            "type": "string"
+          },
+          "metadata": {
+            "description": "Additional metadata",
+            "example": {
+              "name": "Team Alpha",
+              "status": "active"
+            },
+            "nullable": true,
+            "type": "object"
+          },
+          "node_id": {
+            "description": "Node ID (optional - will use current node if not provided)",
+            "example": "node1",
+            "nullable": true,
+            "type": "string"
+          },
+          "position": {
+            "allOf": [
+              {
+                "$ref": "#/components/schemas/Position"
+              }
+            ],
+            "description": "Geographic position"
+          }
+        },
+        "required": [
+          "entity_id",
+          "entity_type",
+          "position"
+        ],
+        "type": "object"
+      },
+      "LocationResponse": {
+        "properties": {
+          "created_at": {
+            "description": "Creation timestamp",
+            "format": "date-time",
+            "type": "string"
+          },
+          "entity_id": {
+            "description": "Entity UUID",
+            "example": "550e8400-e29b-41d4-a716-446655440000",
+            "format": "uuid",
+            "type": "string"
+          },
+          "entity_type": {
+            "description": "Entity type",
+            "example": "responder",
+            "type": "string"
+          },
+          "id": {
+            "description": "Location report ID",
+            "example": "loc-123",
+            "type": "string"
+          },
+          "metadata": {
+            "description": "Additional metadata",
+            "type": "object"
+          },
+          "node_id": {
+            "description": "Node ID",
+            "example": "node1",
+            "type": "string"
+          },
+          "position": {
+            "allOf": [
+              {
+                "$ref": "#/components/schemas/Position"
+              }
+            ],
+            "description": "Geographic position"
+          }
+        },
+        "type": "object"
+      },
+      "LocationSuccessResponseSchema": {
+        "properties": {
+          "data": {
+            "allOf": [
+              {
+                "$ref": "#/components/schemas/LocationResponse"
+              }
+            ],
+            "description": "Location data"
+          },
+          "status": {
+            "description": "Response status",
+            "example": "success",
+            "type": "string"
+          }
+        },
+        "type": "object"
+      },
+      "NearbyRequestSchema": {
+        "properties": {
+          "center": {
+            "allOf": [
+              {
+                "$ref": "#/components/schemas/Position"
+              }
+            ],
+            "description": "Center point for search"
+          },
+          "entity_type": {
+            "description": "Filter by entity type (optional)",
+            "enum": [
+              "responder",
+              "civilian",
+              "incident",
+              "resource",
+              "hazard"
+            ],
+            "example": "resource",
+            "nullable": true,
+            "type": "string"
+          },
+          "radius_km": {
+            "description": "Search radius in kilometers",
+            "example": 5.0,
+            "type": "number"
+          }
+        },
+        "required": [
+          "center",
+          "radius_km"
+        ],
+        "type": "object"
+      },
+      "NearbyResponseSchema": {
+        "properties": {
+          "center": {
+            "allOf": [
+              {
+                "$ref": "#/components/schemas/Position"
+              }
+            ],
+            "description": "Search center point"
+          },
+          "count": {
+            "description": "Number of entities found",
+            "example": 5,
+            "type": "integer"
+          },
+          "data": {
+            "description": "List of nearby locations",
+            "items": {
+              "$ref": "#/components/schemas/LocationResponse"
+            },
+            "type": "array"
+          },
+          "radius_km": {
+            "description": "Search radius in kilometers",
+            "type": "number"
+          },
+          "status": {
+            "description": "Response status",
+            "example": "success",
+            "type": "string"
+          }
+        },
+        "type": "object"
+      },
+      "NodeIdResponseSchema": {
+        "properties": {
+          "node_id": {
+            "description": "Current node ID",
+            "example": "node-abc123",
+            "type": "string"
+          },
+          "status": {
+            "description": "Response status",
+            "example": "success",
+            "type": "string"
+          }
+        },
+        "type": "object"
+      },
+      "Position": {
+        "properties": {
+          "accuracy": {
+            "description": "Accuracy in meters",
+            "example": 10.0,
+            "nullable": true,
+            "type": "number"
+          },
+          "alt": {
+            "description": "Altitude in meters",
+            "example": 100.0,
+            "nullable": true,
+            "type": "number"
+          },
+          "lat": {
+            "description": "Latitude",
+            "example": 52.52,
+            "type": "number"
+          },
+          "lon": {
+            "description": "Longitude",
+            "example": 13.405,
+            "type": "number"
+          }
+        },
+        "required": [
+          "lat",
+          "lon"
+        ],
+        "type": "object"
+      }
+    }
+  },
+  "info": {
+    "description": "API for Nexum Mesh Network - Disaster Relief Communication System",
+    "title": "Nexum Mesh API",
+    "version": "1.0.0"
+  },
+  "openapi": "3.0.0",
+  "paths": {
+    "/api/health": {
+      "get": {
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "properties": {
+                    "status": {
+                      "example": "healthy",
+                      "type": "string"
+                    },
+                    "timestamp": {
+                      "format": "date-time",
+                      "type": "string"
+                    }
+                  },
+                  "type": "object"
+                }
+              }
+            },
+            "description": "Service health status"
+          }
+        },
+        "summary": "Health check endpoint",
+        "tags": [
+          "health"
+        ]
+      }
+    },
+    "/api/locations/": {
+      "post": {
+        "description": "Add a location report for an entity (responder, civilian, etc.)",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/LocationRequestSchema"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "201": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/LocationSuccessResponseSchema"
+                }
+              }
+            },
+            "description": "Location added successfully"
+          },
+          "400": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "properties": {
+                    "message": {
+                      "example": "Invalid request data",
+                      "type": "string"
+                    },
+                    "status": {
+                      "example": "error",
+                      "type": "string"
+                    }
+                  },
+                  "type": "object"
+                }
+              }
+            },
+            "description": "Invalid request data"
+          }
+        },
+        "summary": "Record a new location report",
+        "tags": [
+          "locations"
+        ]
+      }
+    },
+    "/api/locations/history/{entity_id}": {
+      "get": {
+        "description": "Retrieve location history for a specific entity",
+        "parameters": [
+          {
+            "description": "Entity UUID",
+            "in": "path",
+            "name": "entity_id",
+            "required": true,
+            "schema": {
+              "format": "uuid",
+              "type": "string"
+            }
+          },
+          {
+            "description": "UTC milliseconds timestamp (optional)",
+            "in": "query",
+            "name": "since",
+            "required": false,
+            "schema": {
+              "type": "integer"
+            }
+          },
+          {
+            "description": "Maximum number of results (default: 100)",
+            "in": "query",
+            "name": "limit",
+            "required": false,
+            "schema": {
+              "default": 100,
+              "type": "integer"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/LocationListResponseSchema"
+                }
+              }
+            },
+            "description": "Location history retrieved successfully"
+          },
+          "400": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "properties": {
+                    "message": {
+                      "type": "string"
+                    },
+                    "status": {
+                      "example": "error",
+                      "type": "string"
+                    }
+                  },
+                  "type": "object"
+                }
+              }
+            },
+            "description": "Invalid UUID or parameter"
+          }
+        },
+        "summary": "Get location history for an entity",
+        "tags": [
+          "locations"
+        ]
+      }
+    },
+    "/api/locations/latest": {
+      "get": {
+        "description": "Retrieve the most recent location report for each entity",
+        "parameters": [
+          {
+            "description": "Filter by entity type (optional)",
+            "in": "query",
+            "name": "type",
+            "required": false,
+            "schema": {
+              "enum": [
+                "responder",
+                "civilian",
+                "incident",
+                "resource",
+                "hazard"
+              ],
+              "type": "string"
+            }
+          },
+          {
+            "description": "Maximum number of results (default: 100)",
+            "in": "query",
+            "name": "limit",
+            "required": false,
+            "schema": {
+              "default": 100,
+              "type": "integer"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/LocationListResponseSchema"
+                }
+              }
+            },
+            "description": "Latest locations retrieved successfully"
+          },
+          "400": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "properties": {
+                    "message": {
+                      "type": "string"
+                    },
+                    "status": {
+                      "example": "error",
+                      "type": "string"
+                    }
+                  },
+                  "type": "object"
+                }
+              }
+            },
+            "description": "Invalid parameter"
+          }
+        },
+        "summary": "Get latest location for each entity",
+        "tags": [
+          "locations"
+        ]
+      }
+    },
+    "/api/locations/nearby": {
+      "post": {
+        "description": "Search for entities within a specified radius of a location",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/NearbyRequestSchema"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/NearbyResponseSchema"
+                }
+              }
+            },
+            "description": "Nearby entities found"
+          },
+          "400": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "properties": {
+                    "message": {
+                      "type": "string"
+                    },
+                    "status": {
+                      "example": "error",
+                      "type": "string"
+                    }
+                  },
+                  "type": "object"
+                }
+              }
+            },
+            "description": "Invalid request data"
+          }
+        },
+        "summary": "Find entities near a location",
+        "tags": [
+          "locations"
+        ]
+      }
+    },
+    "/api/locations/node-id": {
+      "get": {
+        "description": "Retrieve the ID of the current mesh node",
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/NodeIdResponseSchema"
+                }
+              }
+            },
+            "description": "Current node ID"
+          }
+        },
+        "summary": "Get current node ID",
+        "tags": [
+          "locations"
+        ]
+      }
+    },
+    "/api/locations/types": {
+      "get": {
+        "description": "Retrieve all valid entity type values",
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/EntityTypesResponseSchema"
+                }
+              }
+            },
+            "description": "List of entity types"
+          }
+        },
+        "summary": "Get list of valid entity types",
+        "tags": [
+          "locations"
+        ]
+      }
+    }
+  },
+  "swagger": "3.0"
+}

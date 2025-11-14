@@ -5,6 +5,9 @@ Web-based messaging system for BATMAN-adv mesh networks
 """
 
 from flask import Flask, render_template, jsonify, request
+from flask_marshmallow import Marshmallow
+from flasgger import Swagger
+from marshmallow import ValidationError
 import os
 import sqlite3
 from datetime import datetime
@@ -16,9 +19,69 @@ app = Flask(__name__, static_folder='assets', static_url_path='/assets')
 app.config['SECRET_KEY'] = os.environ.get('SECRET_KEY', 'dev-secret-key-change-in-production')
 app.config['DATABASE'] = os.path.join(os.path.dirname(__file__), 'data', 'messaging.db')
 
-# Register blueprints
-from routes.location_routes import location_bp
+# Initialize Marshmallow
+ma = Marshmallow(app)
+
+# Configure Swagger/OpenAPI with Marshmallow support
+app.config['SWAGGER'] = {
+    'title': 'Nexum Mesh API',
+    'uiversion': 3,
+    'openapi': '3.0.0',
+    'version': '1.0.0',
+    'description': 'API for Nexum Mesh Network - Disaster Relief Communication System',
+    'specs': [
+        {
+            'endpoint': 'apispec',
+            'route': '/apispec.json',
+            'rule_filter': lambda rule: True,
+            'model_filter': lambda tag: True,
+        }
+    ],
+    'static_url_path': '/flasgger_static',
+    'swagger_ui': True,
+    'specs_route': '/apidocs',
+    'tags': [
+        {
+            'name': 'locations',
+            'description': 'Location tracking and queries'
+        },
+        {
+            'name': 'health',
+            'description': 'Health check endpoints'
+        }
+    ]
+}
+
+# Register blueprints FIRST (before Swagger initialization)
+from routes.location_routes import location_bp, _apispec
 app.register_blueprint(location_bp)
+
+# Get schema components from APISpec
+# This registers all Marshmallow schemas with Swagger automatically
+try:
+    apispec_dict = _apispec.to_dict()
+    schema_components = apispec_dict.get('components', {}).get('schemas', {})
+except Exception as e:
+    print(f"Warning: Could not extract schemas from APISpec: {e}")
+    schema_components = {}
+
+# Configure Swagger with registered schemas from APISpec
+swagger_template = {
+    'swagger': '3.0',
+    'info': {
+        'title': 'Nexum Mesh API',
+        'version': '1.0.0',
+        'description': 'API for Nexum Mesh Network - Disaster Relief Communication System'
+    }
+}
+
+# Add components if we have schemas
+if schema_components:
+    swagger_template['components'] = {
+        'schemas': schema_components
+    }
+
+swagger = Swagger(app, template=swagger_template)
 
 # Ensure data directory exists
 DATA_DIR = os.path.join(os.path.dirname(__file__), 'data')
@@ -92,7 +155,26 @@ def test_location():
 
 @app.route('/api/health')
 def health():
-    """Health check endpoint"""
+    """
+    Health check endpoint
+    ---
+    tags:
+      - health
+    responses:
+      200:
+        description: Service health status
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                status:
+                  type: string
+                  example: healthy
+                timestamp:
+                  type: string
+                  format: date-time
+    """
     return jsonify({
         'status': 'healthy',
         'timestamp': datetime.now().isoformat()
