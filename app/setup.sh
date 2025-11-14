@@ -5,16 +5,20 @@ set -e
 
 echo "Setting up Nexum Mesh Messaging..."
 
-# Check if Python 3 is installed
-if ! command -v python3 &> /dev/null; then
-    echo "Error: Python 3 is not installed"
-    exit 1
-fi
 
-# Create virtual environment (optional but recommended)
+# --- 1. Check/Install System Dependencies ---
+# This section now attempts to install missing packages.
+echo "Checking and installing system dependencies (python3, pip, venv)..."
+apt update
+apt install -y python3 python3-pip python3-venv
+
+echo "All system dependencies are installed."
+
+# --- 2. Create Virtual Environment ---
+# We create the venv as root, which is fine since the service will run as root
 if [ ! -d "venv" ]; then
-    echo "Creating virtual environment..."
-    python3 -m venv venv
+    echo "Creating virtual environment..."
+    python3 -m venv venv
 fi
 
 # Activate virtual environment
