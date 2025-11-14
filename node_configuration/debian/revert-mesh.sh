@@ -89,22 +89,45 @@ revert_mesh() {
         echo "   Removing bridge br-ap..."
         ip link set br-ap down 2>/dev/null || true
         
-        # Remove ap0 from bridge if it's in the bridge
-        if brctl show br-ap 2>/dev/null | grep -q ap0; then
-            brctl delif br-ap ap0 2>/dev/null || true
-        fi
+        # Remove interfaces from bridge (could be ap0, wlan1, wlan2, etc.)
+        for IFACE in ap0 wlan1 wlan2; do
+            if brctl show br-ap 2>/dev/null | grep -q "$IFACE"; then
+                brctl delif br-ap "$IFACE" 2>/dev/null || true
+                echo "   Removed $IFACE from bridge"
+            fi
+        done
         
         # Delete the bridge
         brctl delbr br-ap 2>/dev/null || true
         echo "   ✓ Bridge br-ap removed"
     fi
     
-    # Remove virtual AP interface
+    # Remove virtual AP interface (ap0) if it exists
     if ip link show ap0 &>/dev/null; then
         ip link set ap0 down 2>/dev/null || true
         iw dev ap0 del 2>/dev/null || true
         echo "   ✓ ap0 interface removed"
     fi
+    
+    # Reset physical AP interfaces (wlan1, wlan2) if they exist
+    for AP_IFACE in wlan1 wlan2; do
+        if ip link show "$AP_IFACE" &>/dev/null; then
+            echo "   Resetting $AP_IFACE (AP interface)..."
+            ip link set "$AP_IFACE" down 2>/dev/null || true
+            iw dev "$AP_IFACE" disconnect 2>/dev/null || true
+            iw dev "$AP_IFACE" set type managed 2>/dev/null || true
+            
+            # Re-enable NetworkManager for AP interface
+            if systemctl is-active --quiet NetworkManager 2>/dev/null; then
+                if command -v nmcli &> /dev/null; then
+                    nmcli device set "$AP_IFACE" managed yes 2>/dev/null || true
+                fi
+            fi
+            
+            ip link set "$AP_IFACE" up 2>/dev/null || true
+            echo "   ✓ $AP_IFACE reset to managed mode"
+        fi
+    done
     
     # Stop dnsmasq service
     systemctl stop dnsmasq 2>/dev/null || true

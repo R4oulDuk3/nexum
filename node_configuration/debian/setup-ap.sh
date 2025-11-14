@@ -14,8 +14,11 @@ set -e
 # CONFIGURABLE VARIABLES
 # ==============================================================================
 
-# Wireless interface name (usually wlan0) - same as used for mesh
-WIRELESS_INTERFACE="${WIRELESS_INTERFACE:-wlan0}"
+# Mesh interface name (usually wlan0) - used for mesh network
+MESH_INTERFACE="${MESH_INTERFACE:-wlan0}"
+
+# AP interface name (usually wlan1) - separate physical WiFi adapter for AP
+AP_INTERFACE="${AP_INTERFACE:-wlan1}"
 
 # Mesh channel (must match the mesh network channel)
 MESH_CHANNEL="${MESH_CHANNEL:-6}"
@@ -23,7 +26,6 @@ MESH_CHANNEL="${MESH_CHANNEL:-6}"
 # AP Configuration
 AP_SSID="${AP_SSID:-Nexum-Relief}"
 AP_PASSWORD="${AP_PASSWORD:-ReliefNet123}"
-AP_INTERFACE="ap0"  # Virtual AP interface on same phy
 BRIDGE_INTERFACE="br-ap"  # Bridge for AP and mesh
 
 # IP address range (must match mesh network)
@@ -82,11 +84,33 @@ if [ "$(id -u)" -ne 0 ]; then
     exit 1
 fi
 
-# Verify wireless interface exists
-if [ ! -d "/sys/class/net/$WIRELESS_INTERFACE" ]; then
-    echo "Error: Wireless interface $WIRELESS_INTERFACE not found"
+# Verify mesh interface exists
+if [ ! -d "/sys/class/net/$MESH_INTERFACE" ]; then
+    echo "Error: Mesh interface $MESH_INTERFACE not found"
     echo "Available interfaces:"
     ls /sys/class/net/ | grep -v lo
+    exit 1
+fi
+
+# Verify AP interface exists (must be a separate physical interface)
+if [ ! -d "/sys/class/net/$AP_INTERFACE" ]; then
+    echo "Error: AP interface $AP_INTERFACE not found!"
+    echo ""
+    echo "This script requires a separate WiFi adapter for the Access Point."
+    echo "The mesh network uses $MESH_INTERFACE, and AP needs a different interface."
+    echo ""
+    echo "Available interfaces:"
+    ls /sys/class/net/ | grep -v lo
+    echo ""
+    echo "Please connect a USB WiFi adapter or specify a different interface:"
+    echo "  sudo AP_INTERFACE=wlan2 ./setup-ap.sh"
+    exit 1
+fi
+
+# Verify AP interface is different from mesh interface
+if [ "$AP_INTERFACE" = "$MESH_INTERFACE" ]; then
+    echo "Error: AP interface ($AP_INTERFACE) cannot be the same as mesh interface ($MESH_INTERFACE)"
+    echo "You need a separate WiFi adapter for the Access Point."
     exit 1
 fi
 
@@ -98,10 +122,10 @@ if ! ip link show bat0 &>/dev/null; then
 fi
 
 echo "Configuration:"
-echo "  Wireless interface: $WIRELESS_INTERFACE"
+echo "  Mesh interface: $MESH_INTERFACE (used for bat0 mesh network)"
+echo "  AP interface: $AP_INTERFACE (dedicated WiFi adapter for Access Point)"
 echo "  Mesh channel: $MESH_CHANNEL"
 echo "  AP SSID: $AP_SSID"
-echo "  AP interface: $AP_INTERFACE"
 echo "  Bridge interface: $BRIDGE_INTERFACE"
 echo "  IP range: $IP_RANGE"
 echo ""
@@ -119,9 +143,10 @@ if [ -z "$AP_PASSWORD" ] || [ "$AP_PASSWORD" = "ReliefNet123" ]; then
     AP_PASSWORD=${AP_PASSWORD_INPUT:-$AP_PASSWORD}
 fi
 
-echo ""
-echo "Note: Using same WiFi interface for both mesh and AP"
-echo "This creates a virtual AP interface on the same radio"
+echo "Architecture:"
+echo "  - $MESH_INTERFACE → bat0 (mesh network, IBSS mode)"
+echo "  - $AP_INTERFACE → AP mode (separate radio, no conflicts)"
+echo "  - br-ap → Bridge connecting AP clients to mesh network"
 echo ""
 
 # Stop services before setup
@@ -129,28 +154,46 @@ echo "Stopping services..."
 systemctl stop hostapd 2>/dev/null || true
 systemctl stop dnsmasq 2>/dev/null || true
 
-# Get the phy device from the wireless interface
-PHY_NAME=$(basename $(readlink /sys/class/net/"$WIRELESS_INTERFACE"/phy80211 2>/dev/null) 2>/dev/null || echo "")
-if [ -z "$PHY_NAME" ]; then
-    PHY_NAME=$(iw dev "$WIRELESS_INTERFACE" info 2>/dev/null | grep -oP 'wiphy \K[0-9]+' | sed 's/^/phy/' || echo "phy0")
+# Configure AP interface (wlan1) for AP mode
+echo "Configuring $AP_INTERFACE for Access Point mode..."
+
+# Stop NetworkManager from managing the AP interface
+if systemctl is-active --quiet NetworkManager 2>/dev/null; then
+    echo "  Stopping NetworkManager on $AP_INTERFACE..."
+    if command -v nmcli &> /dev/null; then
+        nmcli device set "$AP_INTERFACE" managed no 2>/dev/null || true
+    fi
+    sleep 1
 fi
 
-echo "Using PHY device: $PHY_NAME"
+# Kill wpa_supplicant if running on this interface
+if pgrep -f "wpa_supplicant.*$AP_INTERFACE" > /dev/null 2>&1; then
+    echo "  Stopping wpa_supplicant on $AP_INTERFACE..."
+    pkill -f "wpa_supplicant.*$AP_INTERFACE" 2>/dev/null || true
+    sleep 1
+fi
 
-# Remove existing AP interface if it exists
-echo "Removing existing AP interface if present..."
+# Disconnect any existing connections
+iw dev "$AP_INTERFACE" disconnect 2>/dev/null || true
+
+# Bring down the interface
+echo "  Bringing down $AP_INTERFACE..."
 ip link set "$AP_INTERFACE" down 2>/dev/null || true
-iw dev "$AP_INTERFACE" del 2>/dev/null || true
 sleep 1
 
-# Create virtual AP interface on the same phy device
-echo "Creating virtual AP interface $AP_INTERFACE on $PHY_NAME..."
-if ! iw phy "$PHY_NAME" interface add "$AP_INTERFACE" type __ap 2>&1; then
-    echo "ERROR: Could not create virtual AP interface"
-    echo "Single radio limitation: IBSS and AP modes may conflict"
-    echo "This may happen if the interface doesn't support virtual interfaces"
+# Set interface to AP mode
+echo "  Setting $AP_INTERFACE to AP mode..."
+if ! iw dev "$AP_INTERFACE" set type __ap 2>&1; then
+    echo "ERROR: Could not set $AP_INTERFACE to AP mode"
+    echo "Make sure the interface supports AP mode:"
+    echo "  iw phy $(cat /sys/class/net/$AP_INTERFACE/phy80211/name) info | grep -A 10 'Supported interface modes'"
     exit 1
 fi
+
+# Bring interface up
+ip link set "$AP_INTERFACE" up 2>/dev/null || true
+sleep 1
+echo "  ✓ $AP_INTERFACE configured for AP mode"
 
 # Remove existing bridge if it exists
 echo "Removing existing bridge if present..."
@@ -174,12 +217,8 @@ echo "Removing IPs from bat0 and $AP_INTERFACE (IP will be on bridge)..."
 ip addr flush dev bat0 2>/dev/null || true
 ip addr flush dev "$AP_INTERFACE" 2>/dev/null || true
 
-# Calculate IP for bridge (use MAC from bat0 or wireless interface)
-if [ -f /sys/class/net/bat0/address ]; then
-    BRIDGE_IP=$(calculate_ip_from_mac bat0)
-else
-    BRIDGE_IP=$(calculate_ip_from_mac "$WIRELESS_INTERFACE")
-fi
+# Calculate IP for bridge (use MAC from mesh interface to maintain mesh identity)
+BRIDGE_IP=$(calculate_ip_from_mac "$MESH_INTERFACE")
 
 # Set IP on bridge (this is the AP node's address on the mesh)
 echo "Setting IP address $BRIDGE_IP/$IP_CIDR on bridge..."
@@ -237,14 +276,21 @@ if systemctl start hostapd && systemctl start dnsmasq; then
     echo "========================================="
     echo ""
     echo "AP Configuration:"
+    echo "  Mesh interface: $MESH_INTERFACE (bat0 - mesh network)"
+    echo "  AP interface: $AP_INTERFACE (Access Point - separate radio)"
     echo "  AP SSID: $AP_SSID"
     echo "  Bridge IP: $BRIDGE_IP/$IP_CIDR"
     echo "  DHCP range: $DHCP_START - $DHCP_END"
+    echo ""
+    echo "Architecture:"
+    echo "  [Clients] ←WiFi AP→ [$AP_INTERFACE] ←Bridge→ [bat0] ←Mesh→ [$MESH_INTERFACE] ←Mesh→ [Other Nodes]"
     echo ""
     echo "Clients connecting to '$AP_SSID' will:"
     echo "  - Get IP addresses from DHCP ($DHCP_START - $DHCP_END)"
     echo "  - Have access to the mesh network via bridge"
     echo "  - Be able to reach other mesh nodes"
+    echo ""
+    echo "✓ Using separate radios - no conflicts between mesh and AP!"
     echo ""
 else
     echo "Error: Failed to start hostapd or dnsmasq"
