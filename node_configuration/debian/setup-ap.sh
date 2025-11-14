@@ -255,6 +255,7 @@ DHCP_END="$b1.$b2.$b3.200"
 
 cat > /etc/dnsmasq.conf <<EOF
 # Nexum Mesh AP DHCP Configuration
+bind-interfaces
 interface=$BRIDGE_INTERFACE
 dhcp-range=$DHCP_START,$DHCP_END,255.255.255.0,12h
 dhcp-option=3,$BRIDGE_IP
