@@ -1,7 +1,7 @@
 {
   "name": "nexum-api-client-generator",
   "version": "1.0.0",
-  "description": "Scripts to generate JavaScript client from OpenAPI spec using Docker (no Java or Node.js required)",
+  "description": "Scripts to generate JavaScript and Python clients from OpenAPI spec using Docker (no Java or Node.js required)",
   "scripts": {
     "generate-client": "bash generate-client.sh",
     "generate-client:win": "powershell -ExecutionPolicy Bypass -File generate-client.ps1"
