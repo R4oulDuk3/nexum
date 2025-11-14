@@ -62,8 +62,18 @@ revert_mesh() {
         echo "   ✓ Interface removed from batman-adv"
     fi
     
-    # Step 3: Bring down bat0 and remove if exists
-    echo "3. Removing mesh interface..."
+    # Step 3: Remove bridge first (if AP was set up), then bat0
+    echo "3. Removing bridge and mesh interface..."
+    
+    # Check if bridge exists and remove bat0 from it first
+    if ip link show br-ap &>/dev/null; then
+        echo "   Removing bat0 from bridge..."
+        if brctl show br-ap 2>/dev/null | grep -q bat0; then
+            brctl delif br-ap bat0 2>/dev/null || true
+        fi
+    fi
+    
+    # Now remove bat0 (can't delete if it's in a bridge)
     if ip link show bat0 &>/dev/null; then
         ip link set bat0 down 2>/dev/null || true
         batctl if del "$WIRELESS_INTERFACE" 2>/dev/null || true
@@ -71,13 +81,34 @@ revert_mesh() {
         echo "   ✓ bat0 interface removed"
     fi
     
-    # Step 4: Remove virtual AP interface
-    echo "4. Removing virtual AP interface..."
+    # Step 4: Remove bridge and AP interface (if AP was set up)
+    echo "4. Removing bridge and AP interface..."
+    
+    # Remove bridge if it exists (br-ap)
+    if ip link show br-ap &>/dev/null; then
+        echo "   Removing bridge br-ap..."
+        ip link set br-ap down 2>/dev/null || true
+        
+        # Remove ap0 from bridge if it's in the bridge
+        if brctl show br-ap 2>/dev/null | grep -q ap0; then
+            brctl delif br-ap ap0 2>/dev/null || true
+        fi
+        
+        # Delete the bridge
+        brctl delbr br-ap 2>/dev/null || true
+        echo "   ✓ Bridge br-ap removed"
+    fi
+    
+    # Remove virtual AP interface
     if ip link show ap0 &>/dev/null; then
         ip link set ap0 down 2>/dev/null || true
         iw dev ap0 del 2>/dev/null || true
         echo "   ✓ ap0 interface removed"
     fi
+    
+    # Stop dnsmasq service
+    systemctl stop dnsmasq 2>/dev/null || true
+    systemctl disable dnsmasq 2>/dev/null || true
     
     # Step 5: Reset wireless interface
     if [ -n "$WIRELESS_INTERFACE" ]; then

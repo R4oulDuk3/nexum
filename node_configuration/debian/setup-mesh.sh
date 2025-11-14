@@ -37,14 +37,6 @@ IP_RANGE="${IP_RANGE:-169.254.0.0/16}"
 # Extract base network and subnet from IP_RANGE
 IFS='/' read -r IP_BASE IP_CIDR <<< "$IP_RANGE"
 
-# AP Configuration (optional)
-# Set AP_ENABLED=true to enable Access Point mode
-AP_ENABLED="${AP_ENABLED:-false}"
-AP_SSID="${AP_SSID:-Nexum-Relief}"
-AP_PASSWORD="${AP_PASSWORD:-ReliefNet123}"
-AP_INTERFACE="ap0"  # Virtual AP interface on same phy
-BRIDGE_INTERFACE="br-ap"  # Bridge for AP and mesh
-
 # ==============================================================================
 # FUNCTIONS
 # ==============================================================================
@@ -103,141 +95,6 @@ channel_to_frequency() {
     esac
 }
 
-# Setup Access Point (following guide: bridge AP with mesh)
-setup_access_point() {
-    if [ "$AP_ENABLED" != "true" ]; then
-        return 0
-    fi
-    
-    echo ""
-    echo "========================================="
-    echo "Setting Up Wi-Fi Access Point"
-    echo "========================================="
-    echo ""
-    echo "Note: Using same WiFi interface for both mesh and AP"
-    echo "This creates a virtual AP interface on the same radio"
-    echo ""
-    
-    # Stop services before setup
-    echo "Stopping services..."
-    systemctl stop hostapd 2>/dev/null || true
-    systemctl stop dnsmasq 2>/dev/null || true
-    
-    # Get the phy device from the wireless interface
-    PHY_NAME=$(basename $(readlink /sys/class/net/"$WIRELESS_INTERFACE"/phy80211 2>/dev/null) 2>/dev/null || echo "")
-    if [ -z "$PHY_NAME" ]; then
-        PHY_NAME=$(iw dev "$WIRELESS_INTERFACE" info 2>/dev/null | grep -oP 'wiphy \K[0-9]+' | sed 's/^/phy/' || echo "phy0")
-    fi
-    
-    echo "Using PHY device: $PHY_NAME"
-    
-    # Remove existing AP interface if it exists
-    ip link set "$AP_INTERFACE" down 2>/dev/null || true
-    iw dev "$AP_INTERFACE" del 2>/dev/null || true
-    sleep 1
-    
-    # Create virtual AP interface on the same phy device
-    echo "Creating virtual AP interface $AP_INTERFACE on $PHY_NAME..."
-    if ! iw phy "$PHY_NAME" interface add "$AP_INTERFACE" type __ap 2>&1; then
-        echo "ERROR: Could not create virtual AP interface"
-        echo "Single radio limitation: IBSS and AP modes may conflict"
-        echo "Continuing without AP..."
-        AP_ENABLED=false
-        return 1
-    fi
-    
-    # Remove existing bridge if it exists
-    ip link set "$BRIDGE_INTERFACE" down 2>/dev/null || true
-    brctl delbr "$BRIDGE_INTERFACE" 2>/dev/null || true
-    sleep 1
-    
-    # Create bridge br-ap
-    echo "Creating bridge $BRIDGE_INTERFACE..."
-    brctl addbr "$BRIDGE_INTERFACE"
-    
-    # Add bat0 and AP interface to bridge
-    echo "Adding bat0 to bridge..."
-    brctl addif "$BRIDGE_INTERFACE" bat0
-    
-    echo "Adding $AP_INTERFACE to bridge..."
-    brctl addif "$BRIDGE_INTERFACE" "$AP_INTERFACE"
-    
-    # Remove IPs from bat0 and AP interface (IP goes on bridge)
-    echo "Removing IPs from bat0 and $AP_INTERFACE (IP will be on bridge)..."
-    ip addr flush dev bat0 2>/dev/null || true
-    ip addr flush dev "$AP_INTERFACE" 2>/dev/null || true
-    
-    # Calculate IP for bridge (use MAC from bat0 or wireless interface)
-    # Export as global variable so it's available after function returns
-    if [ -f /sys/class/net/bat0/address ]; then
-        export BRIDGE_IP=$(calculate_ip_from_mac bat0)
-    else
-        export BRIDGE_IP=$(calculate_ip_from_mac "$WIRELESS_INTERFACE")
-    fi
-    
-    # Set IP on bridge (this is the AP node's address on the mesh)
-    echo "Setting IP address $BRIDGE_IP/$IP_CIDR on bridge..."
-    ip addr add "$BRIDGE_IP/$IP_CIDR" dev "$BRIDGE_INTERFACE"
-    
-    # Bring up interfaces
-    ip link set "$AP_INTERFACE" up
-    ip link set "$BRIDGE_INTERFACE" up
-    
-    # Configure hostapd using template file
-    echo "Configuring hostapd..."
-    SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
-    HOSTAPD_CONF_TEMPLATE="$SCRIPT_DIR/hostapd.conf"
-    
-    if [ ! -f "$HOSTAPD_CONF_TEMPLATE" ]; then
-        echo "Error: hostapd.conf template not found at $HOSTAPD_CONF_TEMPLATE"
-        echo "Please ensure hostapd.conf exists in the same directory as setup-mesh.sh"
-        AP_ENABLED=false
-        return 1
-    fi
-    
-    # Replace template variables with actual values
-    sed -e "s|@AP_SSID@|$AP_SSID|g" \
-        -e "s|@AP_PASSWORD@|$AP_PASSWORD|g" \
-        -e "s|@MESH_CHANNEL@|$MESH_CHANNEL|g" \
-        -e "s|@WIRELESS_INTERFACE@|$AP_INTERFACE|g" \
-        "$HOSTAPD_CONF_TEMPLATE" > /etc/hostapd/hostapd.conf
-    
-    # Configure dnsmasq for AP clients
-    echo "Configuring dnsmasq..."
-    # Extract network base for DHCP range
-    IFS='.' read -r b1 b2 b3 b4 <<< "$BRIDGE_IP"
-    DHCP_START="$b1.$b2.$b3.100"
-    DHCP_END="$b1.$b2.$b3.200"
-    
-    cat > /etc/dnsmasq.conf <<EOF
-# Nexum Mesh AP DHCP Configuration
-interface=$BRIDGE_INTERFACE
-dhcp-range=$DHCP_START,$DHCP_END,255.255.255.0,12h
-dhcp-option=3,$BRIDGE_IP
-dhcp-option=6,$BRIDGE_IP
-server=8.8.8.8
-server=8.8.4.4
-EOF
-    
-    # Enable and start services
-    systemctl enable hostapd
-    systemctl enable dnsmasq
-    
-    if systemctl start hostapd && systemctl start dnsmasq; then
-        sleep 2
-        echo ""
-        echo "Access Point configured successfully!"
-        echo "  AP SSID: $AP_SSID"
-        echo "  Bridge IP: $BRIDGE_IP/$IP_CIDR"
-        echo "  DHCP range: $DHCP_START - $DHCP_END"
-    else
-        echo "Warning: Failed to start hostapd or dnsmasq"
-        echo "Check logs: sudo journalctl -u hostapd -u dnsmasq -n 50"
-        AP_ENABLED=false
-        return 1
-    fi
-}
-
 # ==============================================================================
 # MAIN SCRIPT
 # ==============================================================================
@@ -275,25 +132,6 @@ echo "  Mesh BSSID (AP MAC): $MESH_BSSID"
 echo "  MTU: $WIRELESS_MTU"
 echo "  IP range: $IP_RANGE"
 echo ""
-
-# Ask if user wants to enable Access Point (if not set via env var)
-if [ "$AP_ENABLED" != "true" ] && [ "$AP_ENABLED" != "false" ]; then
-    echo "Do you want to enable Wi-Fi Access Point mode? (y/n, default: n)"
-    echo "Note: This will use the same WiFi interface for both mesh and AP"
-    read -t 10 REPLY || REPLY="n"
-    if [ "$REPLY" = "y" ] || [ "$REPLY" = "Y" ]; then
-        AP_ENABLED=true
-        echo "Enter AP SSID (default: $AP_SSID): "
-        read -t 10 AP_SSID_INPUT || AP_SSID_INPUT=""
-        AP_SSID=${AP_SSID_INPUT:-$AP_SSID}
-        echo "Enter AP password (default: $AP_PASSWORD): "
-        read -t 10 AP_PASSWORD_INPUT || AP_PASSWORD_INPUT=""
-        AP_PASSWORD=${AP_PASSWORD_INPUT:-$AP_PASSWORD}
-    else
-        AP_ENABLED=false
-    fi
-    echo ""
-fi
 
 # Step 1: Find your Wi-Fi connection name, usually wlan0
 echo "Step 1: Using wireless interface: $WIRELESS_INTERFACE"
@@ -430,22 +268,12 @@ echo "  Calculated IP from MAC: $NODE_IP/$IP_CIDR"
 ip addr flush dev bat0 2>/dev/null || true
 
 # Assign the MAC-based IP address to bat0
-# Note: If AP is enabled, this IP will be moved to the bridge
 if ip addr add "$NODE_IP/$IP_CIDR" dev bat0 2>/dev/null; then
     echo "  Assigned IP address $NODE_IP/$IP_CIDR to bat0"
 else
     echo "Warning: Could not assign IP address to bat0 (may already be assigned)"
     # Show current IP if any
     ip addr show bat0 | grep "inet " || echo "  No IP address found on bat0"
-fi
-
-# Setup Access Point if enabled
-if [ "$AP_ENABLED" = "true" ]; then
-    setup_access_point
-    # If AP setup succeeded, update NODE_IP to bridge IP
-    if [ "$AP_ENABLED" = "true" ] && [ -n "$BRIDGE_IP" ]; then
-        NODE_IP="$BRIDGE_IP"
-    fi
 fi
 
 echo ""
@@ -456,17 +284,12 @@ echo ""
 echo "Node configuration:"
 echo "  Interface: $WIRELESS_INTERFACE"
 echo "  Mesh ESSID: $MESH_ESSID"
-echo "  Channel: $MESH_CHANNEL"
+echo "  Mesh channel: $MESH_CHANNEL"
 echo "  BSSID: $MESH_BSSID"
-if [ "$AP_ENABLED" = "true" ]; then
-    echo "  Access Point: Enabled"
-    echo "  AP SSID: $AP_SSID"
-    echo "  Bridge IP: $NODE_IP/$IP_CIDR (on $BRIDGE_INTERFACE)"
-    echo "  Note: IP is on bridge, not bat0 directly"
-else
-    echo "  Access Point: Disabled"
-    echo "  bat0 IP: $NODE_IP/$IP_CIDR"
-fi
+echo "  bat0 IP: $NODE_IP/$IP_CIDR"
+echo ""
+echo "To set up Access Point (optional):"
+echo "  sudo ./setup-ap.sh"
 echo ""
 echo "Next steps:"
 echo "1. Verify mesh connectivity: batctl o"
