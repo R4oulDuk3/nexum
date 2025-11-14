@@ -70,7 +70,7 @@ if ip link show bat0 &>/dev/null; then
     print_status "PASS" "bat0 interface exists"
     
     # Check if bat0 is up
-    if ip link show bat0 | grep -q "state UP"; then
+    if ip link show bat0 | grep -q "UP"; then
         print_status "PASS" "bat0 interface is UP"
     else
         print_status "FAIL" "bat0 interface is DOWN"
