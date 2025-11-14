@@ -5,22 +5,6 @@ $ErrorActionPreference = "Stop"
 
 Write-Host "Setting up Nexum Mesh Messaging..." -ForegroundColor Cyan
 
-# Check if Python is installed
-try {
-    $pythonVersion = python --version 2>&1
-    Write-Host "Found Python: $pythonVersion" -ForegroundColor Green
-} catch {
-    Write-Host "Error: Python is not installed or not in PATH" -ForegroundColor Red
-    Write-Host "Please install Python 3 from https://www.python.org/downloads/" -ForegroundColor Yellow
-    exit 1
-}
-
-# Check Python version (should be 3.x)
-$version = python --version 2>&1
-if ($version -notmatch "Python 3\.") {
-    Write-Host "Warning: Python 3.x is recommended" -ForegroundColor Yellow
-}
-
 # Create virtual environment (optional but recommended)
 if (-not (Test-Path "venv")) {
     Write-Host "Creating virtual environment..." -ForegroundColor Cyan

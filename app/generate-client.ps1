@@ -1,3 +1,4 @@
+# Generate JavaScript client from OpenAPI specification
 # Generate JavaScript and Python clients from OpenAPI specification
 # PowerShell script for Windows
 # This script downloads the OpenAPI spec and generates clients using Docker
@@ -48,17 +49,23 @@ if (!(Test-Path $PYTHON_OUTPUT_DIR)) {
 Write-Host "📥 Downloading OpenAPI specification..." -ForegroundColor Cyan
 $OPENAPI_SPEC = "openapi.json"
 
+Write-Host "Downloading OpenAPI spec from $API_URL..."
+
 try {
     Invoke-WebRequest -Uri $API_URL -OutFile $OPENAPI_SPEC -ErrorAction Stop
-    Write-Host "✅ OpenAPI spec downloaded" -ForegroundColor Green
 } catch {
-    Write-Host "❌ Error: Could not download OpenAPI spec from $API_URL" -ForegroundColor Red
-    Write-Host "   Make sure your Flask server is running!" -ForegroundColor Yellow
+    Write-Host "Error: Could not download OpenAPI spec"
     exit 1
 }
 
-# Generate JavaScript client using Docker
-Write-Host "⚙️  Generating JavaScript client with Docker..." -ForegroundColor Cyan
+Write-Host "Generating JavaScript client..."
+
+if (!(Get-Command docker -ErrorAction SilentlyContinue)) {
+    Write-Host "Error: Docker not found"
+    exit 1
+}
+
+New-Item -ItemType Directory -Path $OUTPUT_DIR -Force | Out-Null
 
 try {
     $currentDir = (Get-Location).Path
@@ -134,3 +141,5 @@ Write-Host "📁 Python client: $PYTHON_OUTPUT_DIR" -ForegroundColor Cyan
 Write-Host "To use in Python:" -ForegroundColor Yellow
 Write-Host "  from $CLIENT_NAME import ApiClient, LocationsApi"
 
+Remove-Item $OPENAPI_SPEC -Force
+Write-Host "Client generated in $OUTPUT_DIR"

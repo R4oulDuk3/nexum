@@ -3,8 +3,7 @@
   "version": "1.0.0",
   "description": "Scripts to generate JavaScript and Python clients from OpenAPI spec using Docker (no Java or Node.js required)",
   "scripts": {
-    "generate-client": "bash generate-client.sh",
-    "generate-client:win": "powershell -ExecutionPolicy Bypass -File generate-client.ps1"
+    "generate-client": "powershell -ExecutionPolicy Bypass -File generate-client.ps1"
   }
 }
 
