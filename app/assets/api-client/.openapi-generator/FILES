@@ -1,6 +1,5 @@
 .babelrc
 .gitignore
-.openapi-generator-ignore
 .travis.yml
 README.md
 docs/ApiHealthGet200Response.md
@@ -36,17 +35,3 @@ src/model/NearbyRequestSchema.js
 src/model/NearbyResponseSchema.js
 src/model/NodeIdResponseSchema.js
 src/model/Position.js
-test/api/HealthApi.spec.js
-test/api/LocationsApi.spec.js
-test/model/ApiHealthGet200Response.spec.js
-test/model/ApiLocationsHistoryEntityIdGet400Response.spec.js
-test/model/ApiLocationsPost400Response.spec.js
-test/model/EntityTypesResponseSchema.spec.js
-test/model/LocationListResponseSchema.spec.js
-test/model/LocationRequestSchema.spec.js
-test/model/LocationResponse.spec.js
-test/model/LocationSuccessResponseSchema.spec.js
-test/model/NearbyRequestSchema.spec.js
-test/model/NearbyResponseSchema.spec.js
-test/model/NodeIdResponseSchema.spec.js
-test/model/Position.spec.js
