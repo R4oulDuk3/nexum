@@ -53,6 +53,26 @@ function setUserRole(role) {
 }
 
 /**
+ * Get user name from localStorage
+ * @returns {string|null} User name or null if not set
+ */
+function getUserName() {
+    return localStorage.getItem('user_name');
+}
+
+/**
+ * Set user name in localStorage
+ * @param {string} name - User name
+ */
+function setUserName(name) {
+    if (name && name.trim()) {
+        localStorage.setItem('user_name', name.trim());
+    } else {
+        localStorage.removeItem('user_name');
+    }
+}
+
+/**
  * Get current location using Geolocation API
  * @param {Object} options - Geolocation options
  * @returns {Promise<GeolocationPosition>} Geolocation position
@@ -120,6 +140,12 @@ async function sendLocation(options = {}) {
             status: 'active',
             ...options.metadata
         };
+        
+        // Add name to metadata if it exists in localStorage
+        const userName = getUserName();
+        if (userName) {
+            metadata.name = userName;
+        }
 
         // Build request data
         // Note: node_id is handled automatically by the backend
@@ -167,6 +193,8 @@ if (typeof module !== 'undefined' && module.exports) {
         getUserUUID,
         getUserRole,
         setUserRole,
+        getUserName,
+        setUserName,
         getCurrentPosition,
         generateUUID
     };
@@ -177,6 +205,8 @@ if (typeof module !== 'undefined' && module.exports) {
         getUserUUID,
         getUserRole,
         setUserRole,
+        getUserName,
+        setUserName,
         getCurrentPosition,
         generateUUID
     };

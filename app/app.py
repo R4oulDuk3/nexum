@@ -147,6 +147,12 @@ def index():
     return render_template('dashboard.html')
 
 
+@app.route('/settings')
+def settings():
+    """Settings/Configuration page"""
+    return render_template('settings.html')
+
+
 @app.route('/test/location')
 def test_location():
     """Location service test page"""
