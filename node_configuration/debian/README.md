@@ -30,6 +30,7 @@ This directory contains scripts and configuration files for setting up Nexum mes
 - **setup-mesh.sh**: Mesh network configuration script
 - **validate-mesh.sh**: Validation script to check mesh setup status
 - **revert-mesh.sh**: Revert script to restore normal WiFi functionality
+- **uninstall.sh**: Uninstall helper to remove installed scripts and the systemd unit
 - **hostapd.conf**: Template for WiFi Access Point configuration (optional)
 - **batman-mesh.service**: Systemd service file for batman-adv mesh
 - **SETUP.md**: Detailed setup guide and troubleshooting
@@ -154,6 +155,31 @@ This will:
 - Clean up mesh configuration
 
 **Note**: After reverting, you may need to manually reconnect to your WiFi network using NetworkManager or `nmcli`.
+
+## Uninstall
+
+If you installed the scripts and service using `install.sh`, an uninstall helper is provided to remove the installed artifacts (service unit, installed setup script, and runtime state).
+
+Run the uninstall script as root from this directory:
+
+```bash
+sudo chmod +x uninstall.sh
+sudo ./uninstall.sh
+```
+
+To run non-interactively (CI or scripted uninstall):
+
+```bash
+sudo ./uninstall.sh --yes
+```
+
+What it removes:
+- `/etc/systemd/system/batman-mesh.service` (and reloads systemd)
+- `/usr/local/bin/setup-mesh.sh`
+- `/run/nexum/` runtime state saved by the setup script
+- Optionally `/etc/sysctl.d/99-nexum.conf` if present (script will prompt before removing)
+
+After uninstalling, verify NetworkManager and your interfaces are restored (see `revert-mesh.sh` if needed).
 
 ## Troubleshooting
 
