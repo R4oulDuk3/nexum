@@ -133,51 +133,57 @@ revert_mesh() {
     systemctl stop dnsmasq 2>/dev/null || true
     systemctl disable dnsmasq 2>/dev/null || true
     
-    # Step 5: Reset wireless interface
-    if [ -n "$WIRELESS_INTERFACE" ]; then
-        echo "5. Resetting wireless interface..."
+    # Step 5: Reset wireless interfaces (wlan0 for mesh, wlan1 for AP)
+    echo "5. Resetting wireless interfaces..."
+    
+    # Function to reset an interface to managed mode
+    reset_interface() {
+        local iface=$1
+        local purpose=$2
         
-        # Bring down interface
-        ip link set "$WIRELESS_INTERFACE" down 2>/dev/null || true
-        
-        # Disconnect from IBSS if connected
-        iw dev "$WIRELESS_INTERFACE" disconnect 2>/dev/null || true
-        
-        # Set interface back to managed mode
-        iw dev "$WIRELESS_INTERFACE" set type managed 2>/dev/null || true
-        
-        # Reset MTU back to default (1500) - setup script sets it to 1532
-        ip link set mtu 1500 dev "$WIRELESS_INTERFACE" 2>/dev/null || true
-        
-        echo "   ✓ Interface reset to managed mode (MTU reset to 1500)"
-        
-        # Step 6: Re-enable NetworkManager for the interface
-        echo "6. Re-enabling NetworkManager..."
-        if systemctl is-active --quiet NetworkManager 2>/dev/null; then
-            if command -v nmcli &> /dev/null; then
-                nmcli device set "$WIRELESS_INTERFACE" managed yes 2>/dev/null || true
-                echo "   ✓ NetworkManager re-enabled for $WIRELESS_INTERFACE"
-            else
-                echo "   ⚠ nmcli not found, NetworkManager may need manual configuration"
+        if ip link show "$iface" &>/dev/null; then
+            echo "   Resetting $iface ($purpose)..."
+            
+            # Bring down interface
+            ip link set "$iface" down 2>/dev/null || true
+            
+            # Disconnect from IBSS/AP if connected
+            iw dev "$iface" disconnect 2>/dev/null || true
+            
+            # Set interface back to managed mode
+            iw dev "$iface" set type managed 2>/dev/null || true
+            
+            # Reset MTU back to default (1500)
+            ip link set mtu 1500 dev "$iface" 2>/dev/null || true
+            
+            # Re-enable NetworkManager for the interface
+            if systemctl is-active --quiet NetworkManager 2>/dev/null; then
+                if command -v nmcli &> /dev/null; then
+                    nmcli device set "$iface" managed yes 2>/dev/null || true
+                fi
             fi
-        else
-            echo "   ⚠ NetworkManager is not running"
+            
+            ip link set "$iface" up 2>/dev/null || true
+            echo "   ✓ $iface reset to managed mode"
         fi
-        
-        # Step 7: Bring interface back up
-        echo "7. Bringing interface back up..."
-        ip link set "$WIRELESS_INTERFACE" up 2>/dev/null || true
-        sleep 2
-        
-        # Restart NetworkManager to reconnect
-        if systemctl is-active --quiet NetworkManager 2>/dev/null; then
-            systemctl restart NetworkManager 2>/dev/null || true
-            echo "   ✓ NetworkManager restarted"
-        fi
+    }
+    
+    # Reset wlan0 (mesh interface)
+    reset_interface wlan0 "mesh interface"
+    
+    # Reset wlan1 (AP interface) - Note: This may have been partially done in Step 4
+    # But we ensure it's fully reset here
+    reset_interface wlan1 "AP interface"
+    
+    # Step 6: Restart NetworkManager to reconnect
+    echo "6. Restarting NetworkManager..."
+    if systemctl is-active --quiet NetworkManager 2>/dev/null; then
+        systemctl restart NetworkManager 2>/dev/null || true
+        echo "   ✓ NetworkManager restarted"
     fi
     
-    # Step 8: Remove systemd service file
-    echo "8. Removing systemd service..."
+    # Step 7: Remove systemd service file
+    echo "7. Removing systemd service..."
     if [ -f /etc/systemd/system/batman-mesh.service ]; then
         systemctl daemon-reload 2>/dev/null || true
         rm -f /etc/systemd/system/batman-mesh.service
@@ -185,16 +191,16 @@ revert_mesh() {
         echo "   ✓ Service file removed"
     fi
     
-    # Step 9: Restore iptables (optional - clear mesh rules)
-    echo "9. Clearing mesh iptables rules..."
+    # Step 8: Restore iptables (optional - clear mesh rules)
+    echo "8. Clearing mesh iptables rules..."
     # Note: This clears all iptables rules, not just mesh ones
     # A more sophisticated version could backup/restore, but this is simpler
     iptables -t nat -F 2>/dev/null || true
     iptables -F 2>/dev/null || true
     echo "   ✓ iptables rules cleared"
     
-    # Step 10: Unload batman-adv module (optional)
-    echo "10. Unloading batman-adv module..."
+    # Step 9: Unload batman-adv module (optional)
+    echo "9. Unloading batman-adv module..."
     if lsmod | grep -q batman_adv; then
         modprobe -r batman-adv 2>/dev/null || true
         echo "   ✓ batman-adv module unloaded"
@@ -210,15 +216,17 @@ revert_mesh() {
     echo "Your wireless interface should now be restored to normal operation."
     echo ""
     echo "Next steps:"
-    echo "1. Your WiFi interface ($WIRELESS_INTERFACE) should now be in managed mode"
+    echo "1. WiFi interfaces (wlan0, wlan1) should now be in managed mode"
     echo "2. NetworkManager should automatically reconnect to available WiFi networks"
     echo "3. If not, manually connect using:"
     echo "   sudo nmcli device wifi connect \"YOUR_SSID\" password \"YOUR_PASSWORD\""
     echo ""
     echo "To verify:"
-    echo "  iw dev $WIRELESS_INTERFACE info          # Should show type: managed"
-    echo "  ip addr show $WIRELESS_INTERFACE         # Should show normal IP or no IP"
-    echo "  nmcli device status                      # Should show device available"
+    echo "  iw dev wlan0 info          # Should show type: managed"
+    echo "  iw dev wlan1 info          # Should show type: managed (if exists)"
+    echo "  ip addr show wlan0         # Should show normal IP or no IP"
+    echo "  ip addr show wlan1         # Should show normal IP or no IP (if exists)"
+    echo "  nmcli device status        # Should show devices available"
     echo ""
 }
 
