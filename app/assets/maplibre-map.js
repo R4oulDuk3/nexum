@@ -326,8 +326,31 @@ export async function initMap(options = {}) {
     return map;
 }
 
-// Store markers per map instance using WeakMap
-const mapMarkers = new WeakMap();
+/**
+ * Remove all entity markers from the map by class
+ * @param {maplibregl.Map} map - The MapLibre map instance
+ */
+function removeAllMarkersByClass(map) {
+    // Find all marker elements with entity-marker class in the map container
+    const mapContainer = map.getContainer();
+    const markerElements = mapContainer.querySelectorAll('.entity-marker');
+    
+    let removedCount = 0;
+    markerElements.forEach(markerEl => {
+        // Find the parent maplibregl-marker element and remove it
+        const mapMarker = markerEl.closest('.maplibregl-marker');
+        if (mapMarker && mapMarker.parentNode) {
+            mapMarker.parentNode.removeChild(mapMarker);
+            removedCount++;
+        }
+    });
+    
+    if (removedCount > 0) {
+        console.log(`[MapMarkers] Removed ${removedCount} markers by class`);
+    }
+    
+    return removedCount;
+}
 
 /**
  * Add a user marker to the map
@@ -339,26 +362,10 @@ const mapMarkers = new WeakMap();
 export function addUserMarker(map, long, lat) {
     console.log('🔍 DEBUG - addUserMarker called with:', { map, long, lat });
     
-    // Check for existing marker by ID and remove it
-    const existingMarker = document.getElementById('user-marker');
-    if (existingMarker) {
-        console.log('🔍 DEBUG - Removing existing marker with ID "user-marker"');
-        existingMarker.remove();
-    }
-    
-    // Also remove from WeakMap if stored there
-    if (mapMarkers.has(map)) {
-        const markerStore = mapMarkers.get(map);
-        if (markerStore.userMarker) {
-            console.log('🔍 DEBUG - Removing marker from WeakMap');
-            markerStore.userMarker.remove();
-            markerStore.userMarker = null;
-        }
-    }
-    
     // Create custom marker element with user.png icon
     const el = document.createElement('img');
     el.id = 'user-marker';
+    el.className = 'entity-marker entity-marker-user';
     // Flask serves static files from /assets (configured in app.py)
     el.src = '/assets/images/usr.png';
     el.style.width = '50px';
@@ -374,12 +381,6 @@ export function addUserMarker(map, long, lat) {
         .setLngLat(coordinates)
         .addTo(map);
     
-    // Store in WeakMap for reference
-    if (!mapMarkers.has(map)) {
-        mapMarkers.set(map, { userMarker: null });
-    }
-    mapMarkers.get(map).userMarker = marker;
-    
     const markerPos = marker.getLngLat();
     console.log('🔍 DEBUG - Marker added successfully');
     console.log('🔍 DEBUG - Marker position:', markerPos);
@@ -393,18 +394,17 @@ export function addUserMarker(map, long, lat) {
  * @param {maplibregl.Map} map - The MapLibre map instance
  */
 export function removeUserMarker(map) {
-    if (mapMarkers.has(map)) {
-        const markerStore = mapMarkers.get(map);
-        if (markerStore.userMarker) {
-            console.log('🔍 DEBUG - Removing user marker');
-            markerStore.userMarker.remove();
-            markerStore.userMarker = null;
+    // Remove all markers with user-marker class
+    const mapContainer = map.getContainer();
+    const userMarker = mapContainer.querySelector('#user-marker');
+    if (userMarker) {
+        const mapMarker = userMarker.closest('.maplibregl-marker');
+        if (mapMarker && mapMarker.parentNode) {
+            mapMarker.parentNode.removeChild(mapMarker);
             console.log('🔍 DEBUG - User marker removed');
-        } else {
-            console.log('🔍 DEBUG - No user marker to remove');
         }
     } else {
-        console.log('🔍 DEBUG - No marker storage for this map');
+        console.log('🔍 DEBUG - No user marker to remove');
     }
 }
 
@@ -417,48 +417,10 @@ export function removeUserMarker(map) {
 export function updateUserMarker(map, long, lat) {
     console.log('🔍 DEBUG - updateUserMarker called with:', { map, long, lat });
     
-    if (mapMarkers.has(map)) {
-        const markerStore = mapMarkers.get(map);
-        if (markerStore.userMarker) {
-            console.log('🔍 DEBUG - Updating existing marker position from:', markerStore.userMarker.getLngLat(), 'to:', [long, lat]);
-            markerStore.userMarker.setLngLat([long, lat]);
-            map.setCenter([long, lat]);
-            console.log('🔍 DEBUG - Marker position updated, current position:', markerStore.userMarker.getLngLat());
-        } else {
-            console.log('🔍 DEBUG - No existing marker, creating new one');
-            // If marker doesn't exist, create it
-            addUserMarker(map, long, lat);
-            map.setCenter([long, lat]);
-        }
-    } else {
-        console.log('🔍 DEBUG - No marker storage for this map, creating new marker');
-        addUserMarker(map, long, lat);
-        map.setCenter([long, lat]);
-    }
-}
-
-/**
- * Get or create marker store for a map
- * @param {maplibregl.Map} map - The MapLibre map instance
- * @returns {Object} Marker store with entityMarkers Map
- */
-function ensureMarkerStore(map) {
-    if (!mapMarkers.has(map)) {
-        mapMarkers.set(map, {
-            userMarker: null,
-            entityMarkers: new Map() // Map<key, marker> where key = "entity_id_created_at"
-        });
-    }
-    return mapMarkers.get(map);
-}
-
-/**
- * Generate unique key for a location
- * @param {Object} location - Location object with entity_id and created_at
- * @returns {string} Key in format "entity_id_created_at"
- */
-function getLocationKey(location) {
-    return `${location.entity_id}_${location.created_at}`;
+    // Remove existing user marker and add new one
+    removeUserMarker(map);
+    addUserMarker(map, long, lat);
+    map.setCenter([long, lat]);
 }
 
 /**
@@ -554,7 +516,7 @@ function createMarkerElement(entityType, location, isUser = false) {
 
 /**
  * Clear and set markers on the map based on location list
- * Efficient diff-based update: only removes/adds what changed
+ * Always removes all markers first, then adds all new ones
  * 
  * @param {maplibregl.Map} map - The MapLibre map instance
  * @param {Array<Object>} locations - Array of location objects
@@ -564,101 +526,37 @@ function createMarkerElement(entityType, location, isUser = false) {
 export function clearAndSetMarkers(map, locations = []) {
     console.log('[MapMarkers] clearAndSetMarkers called with', locations.length, 'locations');
     
-    const store = ensureMarkerStore(map);
-    const entityMarkers = store.entityMarkers;
     const userId = getUserId();
     
-    // Check if any location matches the user's entity_id
-    const userLocation = userId ? locations.find(loc => loc.entity_id === userId) : null;
+    // Step 1: Remove ALL markers by class
+    const removedCount = removeAllMarkersByClass(map);
+    console.log(`[MapMarkers] Removed all markers: ${removedCount}`);
     
-    // Step 1: Get current keys from map
-    const currentKeys = new Set(entityMarkers.keys());
-    console.log(`[MapMarkers] Current markers on map: ${currentKeys.size}`);
-    
-    // Step 2: Get new keys from location list
-    const newKeys = new Set(locations.map(loc => getLocationKey(loc)));
-    console.log(`[MapMarkers] New markers to show: ${newKeys.size}`);
-    
-    // Step 3: Find keys to remove (in current but not in new)
-    const keysToRemove = [...currentKeys].filter(key => !newKeys.has(key));
-    console.log(`[MapMarkers] Markers to remove: ${keysToRemove.length}`);
-    
-    // Step 4: Find keys to add (in new but not in current)
-    const keysToAdd = new Set(
-        locations
-            .map(loc => getLocationKey(loc))
-            .filter(key => !currentKeys.has(key))
-    );
-    console.log(`[MapMarkers] Markers to add: ${keysToAdd.size}`);
-    
-    // Count what will be added by entity type
-    const toAddByType = {};
-    locations.forEach(location => {
-        const key = getLocationKey(location);
-        if (keysToAdd.has(key)) {
-            toAddByType[location.entity_type] = (toAddByType[location.entity_type] || 0) + 1;
-        }
-    });
-    console.log(`[MapMarkers] Markers to add by entity type:`, toAddByType);
-    
-    // Step 5: Remove markers that are no longer in the list
-    let removedCount = 0;
-    keysToRemove.forEach(key => {
-        const marker = entityMarkers.get(key);
-        if (marker && typeof marker.remove === 'function') {
-            marker.remove();
-            removedCount++;
-        }
-        entityMarkers.delete(key);
-    });
-    
-    // Also remove user marker if it exists and is being removed
-    if (store.userMarker && keysToRemove.some(key => {
-        const loc = locations.find(l => getLocationKey(l) === key);
-        return loc && loc.entity_id === userId;
-    })) {
-        store.userMarker.remove();
-        store.userMarker = null;
-    }
-    
-    // Step 6: Add new markers
+    // Step 2: Add all new markers
     let addedCount = 0;
     const addedByType = {};
+    
     locations.forEach(location => {
-        const key = getLocationKey(location);
+        // Check if this is the user's location
+        const isUser = userId !== null && location.entity_id === userId;
         
-        // Only add if not already present
-        if (keysToAdd.has(key)) {
-            // Check if this is the user's location
-            const isUser = userId !== null && location.entity_id === userId;
-            
-            // Create marker element based on entity type (or user marker if isUser)
-            const markerEl = createMarkerElement(location.entity_type, location, isUser);
-            
-            // Create MapLibre marker
-            const marker = new maplibregl.Marker({ 
-                element: markerEl, 
-                anchor: 'bottom' 
-            })
-                .setLngLat([location.position.lon, location.position.lat])
-                .addTo(map);
-            
-            // Store in WeakMap
-            entityMarkers.set(key, marker);
-            
-            // Track what was added
-            addedCount++;
-            addedByType[location.entity_type] = (addedByType[location.entity_type] || 0) + 1;
-            
-            // If this is the user's location, also store as userMarker
-            if (isUser) {
-                // Remove old user marker if exists
-                if (store.userMarker) {
-                    store.userMarker.remove();
-                }
-                store.userMarker = marker;
-                console.log(`[MapMarkers] Added user marker: ${key}`);
-            }
+        // Create marker element based on entity type (or user marker if isUser)
+        const markerEl = createMarkerElement(location.entity_type, location, isUser);
+        
+        // Create MapLibre marker
+        const marker = new maplibregl.Marker({ 
+            element: markerEl, 
+            anchor: 'bottom' 
+        })
+            .setLngLat([location.position.lon, location.position.lat])
+            .addTo(map);
+        
+        // Track what was added
+        addedCount++;
+        addedByType[location.entity_type] = (addedByType[location.entity_type] || 0) + 1;
+        
+        if (isUser) {
+            console.log(`[MapMarkers] Added user marker for entity: ${location.entity_id}`);
         }
     });
     
@@ -666,17 +564,14 @@ export function clearAndSetMarkers(map, locations = []) {
     console.log(`[MapMarkers]   - Removed: ${removedCount}`);
     console.log(`[MapMarkers]   - Added: ${addedCount}`);
     console.log(`[MapMarkers]   - Added by type:`, addedByType);
-    if (userLocation) {
-        console.log(`[MapMarkers]   - User location found and tracked`);
-    }
     
     // Return result for caller to use
     return {
         removedCount,
         addedCount,
         addedByType,
-        totalBefore: currentKeys.size,
-        totalAfter: entityMarkers.size
+        totalBefore: removedCount,
+        totalAfter: addedCount
     };
 }
 
@@ -717,9 +612,9 @@ export async function refreshMapMarkers(map, mapId = 'default') {
         });
         console.log(`[MapRefresh] Locations by entity type:`, locationsByType);
         
-        // Get current marker count before update
-        const store = ensureMarkerStore(map);
-        const currentMarkerCount = store.entityMarkers ? store.entityMarkers.size : 0;
+        // Get current marker count before update (by counting DOM elements)
+        const mapContainer = map.getContainer();
+        const currentMarkerCount = mapContainer.querySelectorAll('.entity-marker').length;
         console.log(`[MapRefresh] Current markers on map: ${currentMarkerCount}`);
         
         // Update map markers (this will log add/delete details)
@@ -727,8 +622,8 @@ export async function refreshMapMarkers(map, mapId = 'default') {
         const updateResult = clearAndSetMarkers(map, locations);
         
         // Get marker count after update
-        const newMarkerCount = store.entityMarkers ? store.entityMarkers.size : 0;
-        const addedCount = newMarkerCount - currentMarkerCount + (updateResult?.removedCount || 0);
+        const newMarkerCount = mapContainer.querySelectorAll('.entity-marker').length;
+        const addedCount = updateResult?.addedCount || 0;
         const removedCount = updateResult?.removedCount || 0;
         
         const refreshDuration = Date.now() - refreshStartTime;
