@@ -11,22 +11,34 @@
  * @param {maplibregl.Map} map - MapLibre map instance
  */
 export async function initMapControl(mapId, map) {
+    console.log(`[MapControl] Initializing map control for mapId: ${mapId}`);
+    
     if (!mapId || !map) {
+        console.error('[MapControl] Initialization failed: mapId and map are required');
         throw new Error('mapId and map are required');
     }
 
     const control = document.getElementById(`map-control-${mapId}`);
     if (!control) {
+        console.error(`[MapControl] Initialization failed: Map control with id "map-control-${mapId}" not found`);
         throw new Error(`Map control with id "map-control-${mapId}" not found`);
     }
+    console.log(`[MapControl] Map control element found: map-control-${mapId}`);
 
     const updateConfigBtn = document.getElementById(`update-config-btn-${mapId}`);
     const syncBtn = document.getElementById(`sync-btn-${mapId}`);
     const checkboxes = control.querySelectorAll('.entity-type-checkbox');
+    
+    console.log(`[MapControl] UI elements found:`, {
+        updateConfigBtn: !!updateConfigBtn,
+        syncBtn: !!syncBtn,
+        checkboxes: checkboxes.length
+    });
 
     // Load config and update checkboxes
     async function loadConfig() {
         try {
+            console.log(`[MapControl] Loading config for mapId: ${mapId}`);
             const { getMapConfig } = await import('./map-config.js');
             const config = await getMapConfig(mapId);
             
@@ -36,15 +48,27 @@ export async function initMapControl(mapId, map) {
                 ? config.entity_types_to_show 
                 : allTypes;
 
+            console.log(`[MapControl] Config loaded. Selected entity types:`, selectedTypes);
+            
+            let checkedCount = 0;
             checkboxes.forEach(checkbox => {
+                const wasChecked = checkbox.checked;
                 checkbox.checked = selectedTypes.includes(checkbox.value);
+                if (checkbox.checked) checkedCount++;
+                
+                if (wasChecked !== checkbox.checked) {
+                    console.log(`[MapControl] Checkbox ${checkbox.value} set to ${checkbox.checked ? 'checked' : 'unchecked'}`);
+                }
             });
+            
+            console.log(`[MapControl] Updated ${checkboxes.length} checkboxes (${checkedCount} checked)`);
         } catch (error) {
-            console.error('Error loading map config:', error);
+            console.error(`[MapControl] Error loading map config for ${mapId}:`, error);
             // On error, default to all checked
             checkboxes.forEach(checkbox => {
                 checkbox.checked = true;
             });
+            console.log(`[MapControl] Defaulted all ${checkboxes.length} checkboxes to checked due to error`);
         }
     }
 
@@ -66,7 +90,7 @@ export async function initMapControl(mapId, map) {
 
     // Update Config button handler
     if (updateConfigBtn) {
-        console.log('Update Config button found');
+        console.log(`[MapControl] Update Config button found and registered for mapId: ${mapId}`);
         let isUpdating = false;
         updateConfigBtn.addEventListener('click', async () => {
             if (isUpdating) return;
@@ -97,13 +121,12 @@ export async function initMapControl(mapId, map) {
             }
         });
     } else {
-        log.console.warn('Update Config button not found');
-        
+        console.warn(`[MapControl] Update Config button not found for mapId: ${mapId}`);
     }
 
     // Sync button handler
     if (syncBtn) {
-        console.log('Sync button found');
+        console.log(`[MapControl] Sync button found and registered for mapId: ${mapId}`);
         let isSyncing = false;
         syncBtn.addEventListener('click', async () => {
             if (isSyncing) return;
@@ -138,10 +161,11 @@ export async function initMapControl(mapId, map) {
             }
         });
     } else {
-        console.warn('Sync button not found');
+        console.warn(`[MapControl] Sync button not found for mapId: ${mapId}`);
     }
 
     // Load initial config
+    console.log(`[MapControl] Loading initial config for mapId: ${mapId}`);
     await loadConfig();
 
     // Expose methods
@@ -150,6 +174,9 @@ export async function initMapControl(mapId, map) {
     control.updateConfig = async () => {
         if (updateConfigBtn) updateConfigBtn.click();
     };
+    
+    console.log(`[MapControl] Map control initialized successfully for mapId: ${mapId}`);
+    console.log(`[MapControl] Exposed methods: refreshConfig, refreshMap, updateConfig`);
 
     return control;
 }

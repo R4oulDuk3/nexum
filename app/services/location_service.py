@@ -63,6 +63,74 @@ class LocationService:
         
         return report
     
+    def add_locations_batch(self, reports: List[LocationReport], use_transaction: bool = True) -> dict:
+        """
+        Add multiple location reports in batch
+        
+        Args:
+            reports: List of LocationReport objects to store
+            use_transaction: Whether to use a transaction for atomicity (default: True)
+            
+        Returns:
+            Dictionary with 'created', 'failed', and 'errors' keys
+        """
+        if not reports:
+            return {'created': 0, 'failed': 0, 'errors': []}
+        
+        conn = sqlite3.connect(self.db_path)
+        cursor = conn.cursor()
+        
+        created = []
+        errors = []
+        
+        try:
+            if use_transaction:
+                cursor.execute('BEGIN TRANSACTION')
+            
+            for idx, report in enumerate(reports):
+                try:
+                    cursor.execute('''
+                        INSERT INTO location_reports (
+                            id, entity_type, entity_id, node_id,
+                            latitude, longitude, altitude, accuracy,
+                            created_at, metadata
+                        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                    ''', (
+                        str(report.id),
+                        report.entity_type.value,
+                        str(report.entity_id),
+                        report.node_id,
+                        report.position.latitude,
+                        report.position.longitude,
+                        report.position.altitude,
+                        report.position.accuracy,
+                        report.created_at,
+                        json.dumps(report.metadata)
+                    ))
+                    created.append(report)
+                except Exception as e:
+                    errors.append(f'Location {idx}: {str(e)}')
+                    continue
+            
+            if use_transaction:
+                conn.commit()
+            else:
+                conn.commit()
+            
+        except Exception as e:
+            if use_transaction:
+                conn.rollback()
+            errors.append(f'Batch error: {str(e)}')
+            raise
+        finally:
+            conn.close()
+        
+        return {
+            'created': len(created),
+            'failed': len(errors),
+            'errors': errors if errors else None
+        }
+    
     def get_latest_locations(
         self,
         entity_type: Optional[EntityType] = None,

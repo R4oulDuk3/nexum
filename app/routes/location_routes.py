@@ -8,6 +8,7 @@ from marshmallow import ValidationError
 from apispec import APISpec
 from apispec.ext.marshmallow import MarshmallowPlugin
 from uuid import UUID
+from datetime import datetime, timezone
 import sys
 from pathlib import Path
 
@@ -139,12 +140,16 @@ def add_location():
         if isinstance(entity_id, str):
             entity_id = UUID(entity_id)
         
+        # Get created_at from request if provided, otherwise use None (will default to now())
+        created_at = data.get('created_at')
+        
         report = LocationReport.create_new(
             entity_type=EntityType(data['entity_type']),
             entity_id=entity_id,
             node_id=node_id,
             position=GeoLocation.from_dict(data['position']),
-            metadata=data.get('metadata', {})
+            metadata=data.get('metadata', {}),
+            created_at=created_at
         )
         
         location_service.add_location(report)
@@ -159,6 +164,187 @@ def add_location():
             'status': 'error',
             'message': f'Invalid request data: {str(e)}'
         }), 400
+    except Exception as e:
+        return jsonify({
+            'status': 'error',
+            'message': f'Server error: {str(e)}'
+        }), 500
+
+
+@location_bp.route('/batch', methods=['POST'])
+@swag_from({
+    'tags': ['locations'],
+    'summary': 'Add multiple location reports in batch',
+    'description': 'Record multiple location reports in a single request. Useful for scenario generation.',
+    'requestBody': {
+        'required': True,
+        'content': {
+            'application/json': {
+                'schema': {
+                    'type': 'object',
+                    'properties': {
+                        'locations': {
+                            'type': 'array',
+                            'items': {
+                                '$ref': '#/components/schemas/LocationRequestSchema'
+                            },
+                            'minItems': 1,
+                            'maxItems': 1000,
+                            'description': 'Array of location reports to add'
+                        }
+                    },
+                    'required': ['locations']
+                },
+                'example': {
+                    'locations': [
+                        {
+                            'entity_type': 'responder',
+                            'entity_id': '550e8400-e29b-41d4-a716-446655440000',
+                            'position': {'lat': 52.5200, 'lon': 13.4050},
+                            'metadata': {'name': 'Team Alpha'},
+                            'created_at': 1640995200000
+                        }
+                    ]
+                }
+            }
+        }
+    },
+    'responses': {
+        201: {
+            'description': 'Locations created successfully',
+            'content': {
+                'application/json': {
+                    'schema': {
+                        'type': 'object',
+                        'properties': {
+                            'status': {'type': 'string', 'example': 'success'},
+                            'created': {'type': 'integer', 'example': 10},
+                            'failed': {'type': 'integer', 'example': 0},
+                            'errors': {
+                                'type': 'array',
+                                'items': {'type': 'string'}
+                            },
+                            'data': {
+                                'type': 'array',
+                                'items': {'$ref': '#/components/schemas/LocationResponseSchema'}
+                            }
+                        }
+                    }
+                }
+            }
+        },
+        400: {
+            'description': 'Invalid request data',
+            'content': {
+                'application/json': {
+                    'schema': {
+                        'type': 'object',
+                        'properties': {
+                            'status': {'type': 'string', 'example': 'error'},
+                            'message': {'type': 'string'}
+                        }
+                    }
+                }
+            }
+        }
+    }
+})
+def add_locations_batch():
+    """Record multiple location reports in batch"""
+    try:
+        if not request.json or 'locations' not in request.json:
+            return jsonify({
+                'status': 'error',
+                'message': 'Missing "locations" array in request body'
+            }), 400
+        
+        locations = request.json['locations']
+        
+        if not isinstance(locations, list):
+            return jsonify({
+                'status': 'error',
+                'message': '"locations" must be an array'
+            }), 400
+        
+        if len(locations) == 0:
+            return jsonify({
+                'status': 'error',
+                'message': '"locations" array cannot be empty'
+            }), 400
+        
+        if len(locations) > 1000:
+            return jsonify({
+                'status': 'error',
+                'message': f'Batch size too large. Maximum 1000 locations, got {len(locations)}'
+            }), 400
+        
+        # Use provided node_id or get from cluster service
+        node_id = request.json.get('node_id') or cluster_service.get_current_node_id()
+        
+        # Process locations
+        reports = []
+        errors = []
+        now_ms = int(datetime.now(timezone.utc).timestamp() * 1000)
+        
+        for idx, location_data in enumerate(locations):
+            try:
+                # Validate individual location
+                errors_validate = location_request_schema.validate(location_data)
+                if errors_validate:
+                    errors.append(f'Location {idx}: Validation error - {errors_validate}')
+                    continue
+                
+                data = location_request_schema.load(location_data)
+                
+                # Handle entity_id (could be UUID string or object)
+                entity_id = data['entity_id']
+                if isinstance(entity_id, str):
+                    entity_id = UUID(entity_id)
+                
+                # Use provided created_at or current time
+                # If created_at is explicitly None or not provided, use current time
+                created_at = data.get('created_at')
+                if created_at is None:
+                    created_at = int(datetime.now(timezone.utc).timestamp() * 1000)
+                
+                # Create LocationReport
+                report = LocationReport.create_new(
+                    entity_type=EntityType(data['entity_type']),
+                    entity_id=entity_id,
+                    node_id=data.get('node_id') or node_id,
+                    position=GeoLocation.from_dict(data['position']),
+                    created_at=created_at,
+                    metadata=data.get('metadata', {})
+                )
+                
+                reports.append(report)
+                
+            except Exception as e:
+                errors.append(f'Location {idx}: {str(e)}')
+                continue
+        
+        # Add locations in batch
+        if reports:
+            result = location_service.add_locations_batch(reports)
+            created_count = result['created']
+            failed_count = result['failed'] + len(errors)
+            if result.get('errors'):
+                errors.extend(result['errors'])
+            # Get successfully created reports
+            created_reports = reports[:created_count]
+        else:
+            created_count = 0
+            failed_count = len(errors)
+            created_reports = []
+        
+        return jsonify({
+            'status': 'success',
+            'created': created_count,
+            'failed': failed_count,
+            'errors': errors if errors else None,
+            'data': [r.to_dict() for r in created_reports]
+        }), 201
+        
     except Exception as e:
         return jsonify({
             'status': 'error',

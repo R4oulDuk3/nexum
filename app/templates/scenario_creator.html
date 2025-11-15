@@ -1,0 +1,60 @@
+{% extends "base.html" %}
+
+{% block title %}Scenario Creator - Disaster Simulation{% endblock %}
+
+{% block content %}
+<div class="px-4 py-6 sm:px-0">
+    <h2 class="text-3xl font-bold text-gray-900 mb-6">Disaster Scenario Creator</h2>
+    
+    <div class="bg-white shadow rounded-lg p-6 mb-6">
+        <h3 class="text-lg font-medium text-gray-900 mb-4">Scenario Parameters</h3>
+        
+        <form id="scenarioForm" class="grid grid-cols-1 md:grid-cols-2 gap-4">
+            <!-- Entity counts -->
+            <div>
+                <label for="civilians" class="block text-sm font-medium text-gray-700 mb-1">Civilians</label>
+                <input type="number" id="civilians" value="10" min="0" class="w-full rounded-md border-gray-300 shadow-sm focus:border-blue-500 focus:ring-blue-500">
+            </div>
+            <div>
+                <label for="responders" class="block text-sm font-medium text-gray-700 mb-1">Responders</label>
+                <input type="number" id="responders" value="5" min="0" class="w-full rounded-md border-gray-300 shadow-sm focus:border-blue-500 focus:ring-blue-500">
+            </div>
+            <div>
+                <label for="resources" class="block text-sm font-medium text-gray-700 mb-1">Resources (Safe Houses)</label>
+                <input type="number" id="resources" value="3" min="0" class="w-full rounded-md border-gray-300 shadow-sm focus:border-blue-500 focus:ring-blue-500">
+            </div>
+            <div>
+                <label for="incidents" class="block text-sm font-medium text-gray-700 mb-1">Incidents</label>
+                <input type="number" id="incidents" value="2" min="0" class="w-full rounded-md border-gray-300 shadow-sm focus:border-blue-500 focus:ring-blue-500">
+            </div>
+            <div>
+                <label for="hazards" class="block text-sm font-medium text-gray-700 mb-1">Hazards</label>
+                <input type="number" id="hazards" value="1" min="0" class="w-full rounded-md border-gray-300 shadow-sm focus:border-blue-500 focus:ring-blue-500">
+            </div>
+            <div>
+                <label for="timeRange" class="block text-sm font-medium text-gray-700 mb-1">Time Range (minutes)</label>
+                <input type="number" id="timeRange" value="30" min="1" class="w-full rounded-md border-gray-300 shadow-sm focus:border-blue-500 focus:ring-blue-500">
+            </div>
+        </form>
+        
+        <div class="mt-6 flex gap-4 flex-wrap">
+            <button id="generateBtn" class="bg-blue-600 text-white px-6 py-2 rounded-md hover:bg-blue-700 font-medium">
+                Generate Scenario
+            </button>
+            <button id="stopBtn" class="bg-red-600 text-white px-6 py-2 rounded-md hover:bg-red-700 font-medium hidden">
+                Stop Simulation
+            </button>
+            <button id="deepSyncBtn" class="bg-purple-600 text-white px-6 py-2 rounded-md hover:bg-purple-700 font-medium hidden">
+                Deep Sync
+            </button>
+        </div>
+        
+        <div id="status" class="mt-4 p-4 bg-gray-50 rounded-lg text-sm text-gray-700 max-h-[600px] overflow-y-auto"></div>
+    </div>
+</div>
+{% endblock %}
+
+{% block extra_js %}
+<script type="module" src="{{ url_for('static', filename='scenario-generator.js') }}"></script>
+{% endblock %}
+

@@ -55,6 +55,12 @@ class LocationRequestSchema(Schema):
         description="Additional metadata",
         example={"name": "Team Alpha", "status": "active"}
     )
+    created_at = fields.Int(
+        required=False,
+        allow_none=True,
+        description="UTC milliseconds timestamp (optional - defaults to now())",
+        example=1640995200000
+    )
 
 
 class LocationResponseSchema(Schema):

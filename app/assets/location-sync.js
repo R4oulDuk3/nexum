@@ -202,6 +202,174 @@ export async function updateNodeSync(nodeId, lastSyncTime) {
 }
 
 /**
+ * Deep sync locations from a node for a specific time range (bypasses incremental sync)
+ * Forces retrieval of all data within [startTime, endTime] range
+ * @param {string} nodeId - Node ID to sync from
+ * @param {number} startTime - UTC milliseconds timestamp (start of range)
+ * @param {number} endTime - UTC milliseconds timestamp (end of range)
+ * @returns {Promise<{success: boolean, count: number, error?: string}>}
+ */
+export async function deepSyncWithNode(nodeId, startTime, endTime) {
+    try {
+        const now = Date.now();
+        
+        // Force fetch all data from startTime (ignore last_sync_time)
+        console.log(`[LocationSync] Deep sync Node ${nodeId}: Fetching all data from ${new Date(startTime).toISOString()} to ${new Date(endTime).toISOString()}...`);
+        const allLocations = await fetchNodeData(nodeId, startTime);
+        console.log(`[LocationSync] Deep sync Node ${nodeId}: Received ${allLocations.length} location(s) since startTime`);
+        
+        // Filter to only include data within [startTime, endTime] range
+        const locations = allLocations.filter(loc => {
+            const createdAt = typeof loc.created_at === 'string' ? new Date(loc.created_at).getTime() : loc.created_at;
+            return createdAt >= startTime && createdAt <= endTime;
+        });
+        
+        console.log(`[LocationSync] Deep sync Node ${nodeId}: Filtered to ${locations.length} location(s) in time range`);
+        
+        if (locations.length === 0) {
+            // Update sync time even if no data in range
+            await db.node_sync.put({
+                node_id: nodeId,
+                last_sync_time: now
+            });
+            console.log(`[LocationSync] Deep sync Node ${nodeId}: No data in time range, sync time updated`);
+            return { success: true, count: 0 };
+        }
+        
+        // Write to IndexedDB in transaction
+        console.log(`[LocationSync] Deep sync Node ${nodeId}: Writing ${locations.length} location(s) to IndexedDB...`);
+        await db.transaction('rw', db.locations, db.latest_locations, db.node_sync, async () => {
+            // Write all locations
+            await db.locations.bulkPut(locations);
+            
+            // Update latest_locations cache
+            for (const loc of locations) {
+                const createdAt = typeof loc.created_at === 'string' ? new Date(loc.created_at).getTime() : loc.created_at;
+                const existing = await db.latest_locations.get(loc.entity_id);
+                const existingCreatedAt = existing ? (typeof existing.created_at === 'string' ? new Date(existing.created_at).getTime() : existing.created_at) : 0;
+                
+                if (!existing || createdAt > existingCreatedAt) {
+                    await db.latest_locations.put({
+                        ...loc,
+                        updated_at: now
+                    });
+                }
+            }
+            
+            // Update node sync time
+            await db.node_sync.put({
+                node_id: nodeId,
+                last_sync_time: now
+            });
+        });
+        
+        console.log(`[LocationSync] Deep sync Node ${nodeId}: Successfully synced ${locations.length} location(s)`);
+        return { success: true, count: locations.length };
+        
+    } catch (error) {
+        console.error(`[LocationSync] Deep sync Node ${nodeId}: Error during sync:`, error);
+        return { 
+            success: false, 
+            count: 0, 
+            error: error.message || String(error) 
+        };
+    }
+}
+
+/**
+ * Deep sync with all nodes for a specific time range
+ * Forces retrieval of all data within [startTime, endTime] range from all nodes
+ * @param {number} startTime - UTC milliseconds timestamp (start of range)
+ * @param {number} endTime - UTC milliseconds timestamp (end of range)
+ * @returns {Promise<{synced: number, total: number, totalCount: number, errors: Array}>}
+ */
+export async function deepSyncAllNodes(startTime, endTime) {
+    const syncStartTime = Date.now();
+    console.log(`[LocationSync] Starting deep sync with all nodes for time range ${new Date(startTime).toISOString()} to ${new Date(endTime).toISOString()}...`);
+    
+    try {
+        // Get list of all nodes
+        console.log('[LocationSync] Deep sync: Fetching node list...');
+        const nodeIds = await fetchNodeList();
+        console.log(`[LocationSync] Deep sync: Found ${nodeIds.length} node(s):`, nodeIds);
+        
+        if (nodeIds.length === 0) {
+            console.log('[LocationSync] Deep sync: No nodes found, skipping sync');
+            return { synced: 0, total: 0, totalCount: 0, errors: [] };
+        }
+        
+        // Deep sync with each node
+        console.log(`[LocationSync] Deep sync: Syncing with ${nodeIds.length} node(s)...`);
+        const results = await Promise.allSettled(
+            nodeIds.map(nodeId => {
+                console.log(`[LocationSync] Deep sync: Starting sync with node: ${nodeId}`);
+                return deepSyncWithNode(nodeId, startTime, endTime);
+            })
+        );
+        
+        // Count successes and errors
+        let synced = 0;
+        let totalCount = 0;
+        const errors = [];
+        const nodeStats = [];
+        
+        results.forEach((result, index) => {
+            const nodeId = nodeIds[index];
+            if (result.status === 'fulfilled') {
+                const data = result.value;
+                if (data.success) {
+                    synced++;
+                    totalCount += data.count;
+                    console.log(`[LocationSync] Deep sync ✓ Node ${nodeId}: ${data.count} location(s) synced`);
+                    nodeStats.push({
+                        nodeId,
+                        success: true,
+                        count: data.count,
+                        error: null
+                    });
+                } else {
+                    const errorMsg = data.error || 'Unknown error';
+                    console.warn(`[LocationSync] Deep sync ✗ Node ${nodeId} failed: ${errorMsg}`);
+                    errors.push({ nodeId, error: errorMsg });
+                    nodeStats.push({
+                        nodeId,
+                        success: false,
+                        count: 0,
+                        error: errorMsg
+                    });
+                }
+            } else {
+                const errorMsg = result.reason?.message || String(result.reason);
+                console.error(`[LocationSync] Deep sync ✗ Node ${nodeId} exception: ${errorMsg}`);
+                errors.push({ nodeId, error: errorMsg });
+                nodeStats.push({
+                    nodeId,
+                    success: false,
+                    count: 0,
+                    error: errorMsg
+                });
+            }
+        });
+        
+        const syncDuration = Date.now() - syncStartTime;
+        console.log(`[LocationSync] Deep sync completed in ${syncDuration}ms: ${synced}/${nodeIds.length} nodes synced, ${totalCount} total locations, ${errors.length} errors`);
+        
+        return {
+            synced,
+            total: nodeIds.length,
+            totalCount,
+            errors,
+            nodeStats
+        };
+        
+    } catch (error) {
+        const syncDuration = Date.now() - syncStartTime;
+        console.error(`[LocationSync] Deep sync failed after ${syncDuration}ms:`, error);
+        throw error;
+    }
+}
+
+/**
  * Get sync status for all nodes
  * @returns {Promise<Array>} Array of sync status objects
  */

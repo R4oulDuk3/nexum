@@ -106,6 +106,7 @@ function getCurrentPosition(options = {}) {
  * @param {string} options.entityType - Entity type override (defaults to user_role)
  * @param {string} options.entityId - Entity ID override (defaults to user_uuid)
  * @param {Object} options.metadata - Additional metadata to include
+ * @param {number} options.created_at - Optional UTC milliseconds timestamp
  * @returns {Promise<Object>} Response data from server
  */
 async function sendLocation(options = {}) {
@@ -157,6 +158,11 @@ async function sendLocation(options = {}) {
             position: positionData,
             metadata: metadata
         };
+        
+        // Add optional created_at timestamp if provided
+        if (options.created_at !== undefined && options.created_at !== null) {
+            data.created_at = options.created_at;
+        }
 
         // Send to server using generated API client
         const result = await LocationsService.postApiLocations(data);
@@ -195,9 +201,80 @@ async function sendLocation(options = {}) {
     }
 }
 
+/**
+ * Send multiple locations in batch
+ * @param {Array<Object>} locations - Array of location objects
+ * Each location should have: {entity_type, entity_id, position: {lat, lon}, metadata?, created_at?}
+ * @returns {Promise<Object>} Result with success count, failed count, and errors
+ */
+async function sendLocationsBatch(locations) {
+    try {
+        if (!Array.isArray(locations) || locations.length === 0) {
+            throw new Error('locations must be a non-empty array');
+        }
+        
+        if (locations.length > 1000) {
+            throw new Error('Batch size cannot exceed 1000 locations');
+        }
+        
+        // Build batch request
+        const batchData = {
+            locations: locations.map(loc => ({
+                entity_type: loc.entity_type,
+                entity_id: loc.entity_id || generateUUID(),
+                position: {
+                    lat: loc.position.lat,
+                    lon: loc.position.lon,
+                    alt: loc.position.alt,
+                    accuracy: loc.position.accuracy
+                },
+                metadata: loc.metadata || {},
+                ...(loc.created_at !== undefined && loc.created_at !== null && { created_at: loc.created_at })
+            }))
+        };
+        
+        // Send batch request
+        const response = await fetch('/api/locations/batch', {
+            method: 'POST',
+            headers: {
+                'Content-Type': 'application/json'
+            },
+            body: JSON.stringify(batchData)
+        });
+        
+        const result = await response.json();
+        
+        if (!response.ok) {
+            throw new Error(result.message || 'Batch request failed');
+        }
+        
+        console.log(`[LocationSender] Batch sent: ${result.created} created, ${result.failed} failed`);
+        
+        if (result.errors && result.errors.length > 0) {
+            console.warn(`[LocationSender] Batch errors:`, result.errors);
+        }
+        
+        return {
+            success: true,
+            created: result.created,
+            failed: result.failed,
+            errors: result.errors,
+            data: result.data
+        };
+        
+    } catch (error) {
+        console.error('[LocationSender] Error sending batch:', error);
+        return {
+            success: false,
+            error: error.message || 'Failed to send batch'
+        };
+    }
+}
+
 // Export functions as ES6 module
 export {
     sendLocation,
+    sendLocationsBatch,
     getUserUUID,
     getUserRole,
     setUserRole,
@@ -210,6 +287,7 @@ export {
 // Also export as default object for convenience
 export default {
     sendLocation,
+    sendLocationsBatch,
     getUserUUID,
     getUserRole,
     setUserRole,
@@ -223,6 +301,7 @@ export default {
 if (typeof window !== 'undefined') {
     window.LocationSender = {
         sendLocation,
+        sendLocationsBatch,
         getUserUUID,
         getUserRole,
         setUserRole,

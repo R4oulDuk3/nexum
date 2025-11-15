@@ -89,16 +89,29 @@ class LocationReport:
         entity_id: UUID,
         node_id: str,
         position: GeoLocation,
-        metadata: Optional[Dict[str, Any]] = None
+        metadata: Optional[Dict[str, Any]] = None,
+        created_at: Optional[int] = None
     ) -> 'LocationReport':
-        """Factory method to create a new location report"""
+        """Factory method to create a new location report
+        
+        Args:
+            entity_type: Type of entity
+            entity_id: Unique identifier for the entity
+            node_id: Mesh node ID
+            position: Geographic position
+            metadata: Optional metadata dictionary
+            created_at: Optional UTC milliseconds timestamp (defaults to now())
+        """
+        if created_at is None:
+            created_at = int(datetime.now(timezone.utc).timestamp() * 1000)
+        
         return LocationReport(
             id=uuid4(),
             entity_type=entity_type,
             entity_id=entity_id,
             node_id=node_id,
             position=position,
-            created_at=int(datetime.now(timezone.utc).timestamp() * 1000),
+            created_at=created_at,
             metadata=metadata or {}
         )
 
