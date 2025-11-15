@@ -18,20 +18,27 @@ class ClusterService:
         Get the current node's unique identifier (MAC address)
         
         Returns:
-            MAC address of the bat0 interface (mesh network interface)
-            Falls back to primary network interface if bat0 not available
+            MAC address of the physical wireless interface (wlan0)
+            Falls back to bat0 or other interfaces if wlan0 not available
+            
+        Note: We use wlan0 (physical interface) instead of bat0 (virtual interface)
+        because bat0's MAC can change when the mesh network is reset/recreated.
+        The physical interface MAC is stable across reboots and mesh resets.
         """
         if self._node_id:
             return self._node_id
         
-        # Try to get MAC address from bat0 (mesh interface)
-        node_id = self._get_mac_from_interface('bat0')
+        # IMPORTANT: Try wlan0 FIRST (physical interface - stable MAC)
+        # bat0 is a virtual interface that gets recreated on mesh reset,
+        # which can cause its MAC address to change.
+        # The physical wlan0 MAC address never changes.
+        node_id = self._get_mac_from_interface('wlan0')
         
-        # Fallback to wlan0 if bat0 not available
+        # Fallback to bat0 if wlan0 not available (for systems without wlan0)
         if not node_id:
-            node_id = self._get_mac_from_interface('wlan0')
+            node_id = self._get_mac_from_interface('bat0')
         
-        # Fallback to eth0 if wlan0 not available
+        # Fallback to eth0 if wlan0 and bat0 not available
         if not node_id:
             node_id = self._get_mac_from_interface('eth0')
         
@@ -41,6 +48,7 @@ class ClusterService:
         
         # Cache the result
         self._node_id = node_id
+        print(f"ClusterService: Node ID determined: {node_id}")
         return node_id
     
     def _get_mac_from_interface(self, interface: str) -> str:
