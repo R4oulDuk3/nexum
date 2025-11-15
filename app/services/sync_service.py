@@ -759,20 +759,69 @@ class SyncService:
         
         print(f"SyncService: sync_with_all_peers() - Starting sync with {len(peers)} peers")
         
-        # Check sync_log table state before sync
+        # Initialize sync_log entries for all peers (with timestamp 0 if they don't exist)
+        # This ensures we track all peers even on first sync
+        print(f"\n{'='*60}")
+        print(f"SyncService: Initializing sync_log entries for {len(peers)} peers...")
+        print(f"{'='*60}")
+        
         try:
             conn = sqlite3.connect(self.db_path)
             cursor = conn.cursor()
+            
+            # Check sync_log table state before initialization
             cursor.execute('SELECT COUNT(*) FROM sync_log')
-            sync_log_count = cursor.fetchone()[0]
-            print(f"SyncService: sync_log table currently has {sync_log_count} entries")
-            if sync_log_count > 0:
-                cursor.execute('SELECT peer_node_id, last_known_ip, last_sync_at FROM sync_log')
-                for row in cursor.fetchall():
-                    print(f"  - {row[0]} ({row[1]}): last_sync_at={row[2]}")
+            sync_log_count_before = cursor.fetchone()[0]
+            print(f"  sync_log entries before initialization: {sync_log_count_before}")
+            
+            # Initialize entries for all peers (INSERT if not exists, keep existing if present)
+            initialized_count = 0
+            for peer_mac, peer_ip in peers.items():
+                # Check if entry exists
+                cursor.execute('SELECT peer_node_id, last_sync_at FROM sync_log WHERE peer_node_id = ?', (peer_mac,))
+                existing = cursor.fetchone()
+                
+                if not existing:
+                    # Insert new entry with timestamp 0 (first sync)
+                    cursor.execute('''
+                        INSERT INTO sync_log (peer_node_id, last_known_ip, last_sync_at)
+                        VALUES (?, ?, ?)
+                    ''', (peer_mac, peer_ip, 0))
+                    initialized_count += 1
+                    print(f"  ✓ Initialized new entry for {peer_mac} ({peer_ip}): last_sync_at=0")
+                else:
+                    existing_timestamp = existing[1] if existing[1] else 0
+                    # Update IP if changed, but keep timestamp
+                    cursor.execute('''
+                        UPDATE sync_log 
+                        SET last_known_ip = ?
+                        WHERE peer_node_id = ?
+                    ''', (peer_ip, peer_mac))
+                    print(f"  - Entry exists for {peer_mac} ({peer_ip}): last_sync_at={existing_timestamp} (keeping)")
+            
+            conn.commit()
             conn.close()
+            
+            print(f"  Initialized {initialized_count} new entries, total entries now: {sync_log_count_before + initialized_count}")
+            
+            # Verify initialization
+            conn = sqlite3.connect(self.db_path)
+            cursor = conn.cursor()
+            cursor.execute('SELECT peer_node_id, last_known_ip, last_sync_at FROM sync_log ORDER BY peer_node_id')
+            all_entries = cursor.fetchall()
+            print(f"  All sync_log entries after initialization:")
+            for row in all_entries:
+                row_timestamp = row[2] if row[2] else 0
+                row_readable = datetime.fromtimestamp(row_timestamp / 1000, tz=timezone.utc).isoformat() if row_timestamp > 0 else 'never (0)'
+                print(f"    - {row[0]} ({row[1]}): last_sync_at={row_timestamp} ({row_readable})")
+            conn.close()
+            
         except Exception as e:
-            print(f"SyncService: Error checking sync_log table: {e}")
+            print(f"  ✗ ERROR initializing sync_log entries: {e}")
+            import traceback
+            traceback.print_exc()
+        
+        print(f"{'='*60}\n")
         
         for peer_mac, peer_ip in peers.items():
             try:
@@ -895,8 +944,32 @@ class SyncService:
             "errors": []
         }
         
+        # Initialize sync_log entries for all peers if using sync_log
         if use_sync_log:
             print(f"Test: Pulling data from {len(peers)} peers using sync_log timestamps")
+            print(f"Test: Initializing sync_log entries for peers if needed...")
+            
+            try:
+                conn = sqlite3.connect(self.db_path)
+                cursor = conn.cursor()
+                
+                for peer_mac, peer_ip in peers.items():
+                    # Check if entry exists
+                    cursor.execute('SELECT peer_node_id FROM sync_log WHERE peer_node_id = ?', (peer_mac,))
+                    existing = cursor.fetchone()
+                    
+                    if not existing:
+                        # Insert new entry with timestamp 0
+                        cursor.execute('''
+                            INSERT INTO sync_log (peer_node_id, last_known_ip, last_sync_at)
+                            VALUES (?, ?, ?)
+                        ''', (peer_mac, peer_ip, 0))
+                        print(f"  Test: Initialized sync_log entry for {peer_mac}: last_sync_at=0")
+                
+                conn.commit()
+                conn.close()
+            except Exception as e:
+                print(f"  Test: Error initializing sync_log entries: {e}")
         elif since_timestamp is not None:
             print(f"Test: Pulling data from {len(peers)} peers with since={since_timestamp}")
         else:
