@@ -336,11 +336,77 @@ def get_node_data(node_id):
         }), 500
 
 
+@sync_bp.route('/status', methods=['GET'])
+@swag_from({
+    'tags': ['sync'],
+    'summary': 'Get sync log status',
+    'description': 'Get sync_log status for all peers, showing last sync times and IPs',
+    'responses': {
+        200: {
+            'description': 'Sync log status retrieved successfully',
+            'content': {
+                'application/json': {
+                    'schema': {
+                        'type': 'object',
+                        'properties': {
+                            'status': {'type': 'string', 'example': 'success'},
+                            'sync_log': {
+                                'type': 'array',
+                                'items': {
+                                    'type': 'object',
+                                    'properties': {
+                                        'peer_node_id': {'type': 'string'},
+                                        'last_known_ip': {'type': 'string'},
+                                        'last_sync_at': {'type': 'integer'},
+                                        'last_sync_at_readable': {'type': 'string'},
+                                        'sync_age_ms': {'type': 'integer', 'nullable': True},
+                                        'sync_age_seconds': {'type': 'number', 'nullable': True}
+                                    }
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+        },
+        500: {
+            'description': 'Server error',
+            'content': {
+                'application/json': {
+                    'schema': {
+                        'type': 'object',
+                        'properties': {
+                            'status': {'type': 'string', 'example': 'error'},
+                            'message': {'type': 'string'}
+                        }
+                    }
+                }
+            }
+        }
+    }
+})
+def get_sync_status():
+    """Get sync_log status for all peers"""
+    try:
+        sync_log = sync_service.get_sync_log_status()
+        
+        return jsonify({
+            'status': 'success',
+            'sync_log': sync_log
+        })
+        
+    except Exception as e:
+        return jsonify({
+            'status': 'error',
+            'message': f'Server error: {str(e)}'
+        }), 500
+
+
 @sync_bp.route('/test', methods=['GET'])
 @swag_from({
     'tags': ['sync'],
     'summary': 'Test: Pull data from all peers',
-    'description': 'Test endpoint that pulls data from all peers using since=0 (or specified timestamp). Does not update sync logs.',
+    'description': 'Test endpoint that pulls data from all peers. By default uses sync_log timestamps per peer for incremental sync. Optionally accepts a since parameter to override. Does not update sync logs.',
     'parameters': [
         {
             'name': 'since',
@@ -348,9 +414,19 @@ def get_node_data(node_id):
             'required': False,
             'schema': {
                 'type': 'integer',
-                'default': 0
+                'nullable': True
             },
-            'description': 'UTC milliseconds timestamp to use for all peers (default: 0)'
+            'description': 'Optional UTC milliseconds timestamp to use for all peers (overrides sync_log). If omitted, uses sync_log timestamp per peer.'
+        },
+        {
+            'name': 'use_sync_log',
+            'in': 'query',
+            'required': False,
+            'schema': {
+                'type': 'boolean',
+                'default': True
+            },
+            'description': 'If true, use sync_log timestamps per peer. If false and since is provided, use since for all peers. If false and since is not provided, use 0.'
         }
     ],
     'responses': {
@@ -394,19 +470,34 @@ def get_node_data(node_id):
     }
 })
 def test_pull_all_peers():
-    """Test endpoint to pull data from all peers with a specified timestamp"""
+    """
+    Test endpoint to pull data from all peers.
+    By default uses sync_log timestamps per peer for incremental sync.
+    Can optionally override with since parameter.
+    """
     try:
-        # Get since parameter (default to 0)
-        since = request.args.get('since', type=int, default=0)
+        # Get since parameter (None if not provided, so we use sync_log)
+        since_param = request.args.get('since', type=int)
+        
+        # Get use_sync_log parameter (default True)
+        use_sync_log_param = request.args.get('use_sync_log', type=str, default='true').lower() in ('true', '1', 'yes')
         
         # Call test function in sync service
-        results = sync_service.test_pull_all_peers(since_timestamp=since)
+        results = sync_service.test_pull_all_peers(
+            since_timestamp=since_param,
+            use_sync_log=use_sync_log_param
+        )
         
         return jsonify({
             'status': 'success',
             **results
         })
         
+    except ValueError as e:
+        return jsonify({
+            'status': 'error',
+            'message': f'Invalid parameter: {str(e)}'
+        }), 400
     except Exception as e:
         return jsonify({
             'status': 'error',

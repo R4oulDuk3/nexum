@@ -178,25 +178,37 @@ class SyncService:
     
     def get_last_sync_time(self, peer_node_id: str) -> int:
         """
-        Gets the last sync timestamp (ms) for a given peer from the local DB.
+        Gets the last sync timestamp (ms) for a given peer from the local DB sync_log table.
+        Returns 0 if no sync_log entry exists for this peer.
         """
         try:
             conn = sqlite3.connect(self.db_path)
             conn.row_factory = sqlite3.Row
             cursor = conn.cursor()
             
-            cursor.execute('SELECT last_sync_at FROM sync_log WHERE peer_node_id = ?', (peer_node_id,))
+            cursor.execute('SELECT last_sync_at, last_known_ip FROM sync_log WHERE peer_node_id = ?', (peer_node_id,))
             row = cursor.fetchone()
             conn.close()
             
-            return row['last_sync_at'] if row else 0
+            if row:
+                last_sync_at = row['last_sync_at'] if row['last_sync_at'] else 0
+                last_ip = row['last_known_ip'] if row['last_known_ip'] else 'unknown'
+                # Only log in verbose mode or when debugging
+                # print(f"SyncService: Found sync_log entry for {peer_node_id}: last_sync_at={last_sync_at}, last_ip={last_ip}")
+                return last_sync_at
+            else:
+                # No entry in sync_log yet
+                return 0
         except Exception as e:
             print(f"SyncService: Error getting last sync time for {peer_node_id}: {e}")
+            import traceback
+            traceback.print_exc()
             return 0  # Default to 0 on error
     
     def update_last_sync_time(self, peer_node_id: str, peer_ip: str):
         """
-        Updates the last sync timestamp and IP for a peer.
+        Updates the last sync timestamp and IP for a peer in the sync_log table.
+        Creates a new entry if one doesn't exist, or updates existing entry.
         """
         try:
             now_ms = int(datetime.now(timezone.utc).timestamp() * 1000)
@@ -204,25 +216,30 @@ class SyncService:
             cursor = conn.cursor()
             
             # Check if entry exists
-            cursor.execute('SELECT peer_node_id FROM sync_log WHERE peer_node_id = ?', (peer_node_id,))
-            exists = cursor.fetchone()
+            cursor.execute('SELECT peer_node_id, last_sync_at FROM sync_log WHERE peer_node_id = ?', (peer_node_id,))
+            existing = cursor.fetchone()
             
-            if exists:
+            if existing:
+                old_timestamp = existing[1] if existing[1] else 0
                 cursor.execute('''
                     UPDATE sync_log 
                     SET last_sync_at = ?, last_known_ip = ?
                     WHERE peer_node_id = ?
                 ''', (now_ms, peer_ip, peer_node_id))
+                print(f"SyncService: Updated sync_log for {peer_node_id}: {old_timestamp} -> {now_ms} (IP: {peer_ip})")
             else:
                 cursor.execute('''
                     INSERT INTO sync_log (peer_node_id, last_known_ip, last_sync_at)
                     VALUES (?, ?, ?)
                 ''', (peer_node_id, peer_ip, now_ms))
+                print(f"SyncService: Created sync_log entry for {peer_node_id}: last_sync_at={now_ms}, IP={peer_ip}")
             
             conn.commit()
             conn.close()
         except Exception as e:
             print(f"SyncService: Error updating sync time for {peer_node_id}: {e}")
+            import traceback
+            traceback.print_exc()
     
     def log_incoming_sync_request(self, peer_ip: str, peer_node_id: Optional[str] = None):
         """
@@ -632,6 +649,7 @@ class SyncService:
         """
         Syncs with all visible peers in the mesh network.
         Pulls data from peers and saves it to the database.
+        Uses sync_log to track timestamps per peer for incremental sync.
         Returns a summary of the sync operation.
         """
         peers = self.get_all_peers()
@@ -647,12 +665,22 @@ class SyncService:
         
         my_node_id = self.get_my_node_id()
         
+        print(f"SyncService: sync_with_all_peers() - Starting sync with {len(peers)} peers")
+        
         for peer_mac, peer_ip in peers.items():
             try:
-                # Get last sync time for this peer
+                # Get last sync time for this peer from sync_log
                 last_sync = self.get_last_sync_time(peer_mac)
                 
-                # Pull data from peer
+                if last_sync > 0:
+                    # Convert timestamp to readable format for logging
+                    last_sync_readable = datetime.fromtimestamp(last_sync / 1000, tz=timezone.utc).isoformat()
+                    age_seconds = (int(datetime.now(timezone.utc).timestamp() * 1000) - last_sync) / 1000
+                    print(f"  Peer {peer_mac} ({peer_ip}): Last sync {age_seconds:.1f}s ago (at {last_sync_readable})")
+                else:
+                    print(f"  Peer {peer_mac} ({peer_ip}): No previous sync found, using since=0 (full sync)")
+                
+                # Pull data from peer using the last sync timestamp
                 status_msg, data_list = self.pull_data_from_peer(peer_ip, last_sync)
                 
                 # Check if pull was successful (has data or success message)
@@ -670,14 +698,19 @@ class SyncService:
                     else:
                         results["messages"].append(f"Peer {peer_mac} ({peer_ip}): {status_msg}")
                     
-                    # Update sync time only if pull was successful
+                    # Update sync time since pull was successful (even if no new data)
                     self.update_last_sync_time(peer_mac, peer_ip)
                     results["peers_synced"] += 1
+                    
+                    # Log the sync_log update
+                    new_sync_time = self.get_last_sync_time(peer_mac)
+                    print(f"  Updated sync_log for {peer_mac}: last_sync_at = {new_sync_time}")
                 else:
                     # Pull failed, add to errors
                     error_msg = f"Failed to pull from {peer_mac} ({peer_ip}): {status_msg}"
                     results["errors"].append(error_msg)
                     results["messages"].append(error_msg)
+                    print(f"  Sync_log NOT updated (pull failed)")
                 
             except Exception as e:
                 error_msg = f"Error syncing with {peer_mac} ({peer_ip}): {str(e)}"
@@ -687,13 +720,16 @@ class SyncService:
         
         return results
     
-    def test_pull_all_peers(self, since_timestamp: int = 0) -> Dict[str, Any]:
+    def test_pull_all_peers(self, since_timestamp: Optional[int] = None, use_sync_log: bool = True) -> Dict[str, Any]:
         """
-        Test function that pulls data from all peers with a given timestamp.
+        Test function that pulls data from all peers.
         This version saves the data to the database but doesn't update sync logs.
         
         Args:
-            since_timestamp: Timestamp to use for all peers (default: 0)
+            since_timestamp: Optional timestamp to use for all peers (overrides sync_log if provided).
+                           If None and use_sync_log=True, uses timestamp from sync_log per peer.
+                           If None and use_sync_log=False, defaults to 0 (full sync).
+            use_sync_log: If True, use sync_log timestamps per peer. If False, use since_timestamp or 0.
             
         Returns:
             Dictionary with results of the test pull operation
@@ -709,15 +745,42 @@ class SyncService:
             "errors": []
         }
         
-        print(f"Test: Pulling data from {len(peers)} peers with since={since_timestamp}")
+        if use_sync_log:
+            print(f"Test: Pulling data from {len(peers)} peers using sync_log timestamps")
+        elif since_timestamp is not None:
+            print(f"Test: Pulling data from {len(peers)} peers with since={since_timestamp}")
+        else:
+            print(f"Test: Pulling data from {len(peers)} peers with since=0 (full sync)")
         
         for peer_mac, peer_ip in peers.items():
             try:
                 results["peers_attempted"] += 1
-                print(f"\nTest: Attempting to pull from peer {peer_mac} ({peer_ip})...")
                 
-                # Pull data from peer
-                status_msg, data_list = self.pull_data_from_peer(peer_ip, since_timestamp)
+                # Determine which timestamp to use
+                if use_sync_log and since_timestamp is None:
+                    # Use sync_log timestamp for this peer
+                    peer_since = self.get_last_sync_time(peer_mac)
+                    if peer_since > 0:
+                        age_seconds = (int(datetime.now(timezone.utc).timestamp() * 1000) - peer_since) / 1000
+                        print(f"\nTest: Attempting to pull from peer {peer_mac} ({peer_ip})...")
+                        print(f"  Using sync_log timestamp: {peer_since} ({age_seconds:.1f}s ago)")
+                    else:
+                        peer_since = 0
+                        print(f"\nTest: Attempting to pull from peer {peer_mac} ({peer_ip})...")
+                        print(f"  No sync_log entry found, using since=0 (full sync)")
+                elif since_timestamp is not None:
+                    # Use provided timestamp for all peers
+                    peer_since = since_timestamp
+                    print(f"\nTest: Attempting to pull from peer {peer_mac} ({peer_ip})...")
+                    print(f"  Using provided timestamp: {peer_since}")
+                else:
+                    # Default to 0
+                    peer_since = 0
+                    print(f"\nTest: Attempting to pull from peer {peer_mac} ({peer_ip})...")
+                    print(f"  Using since=0 (full sync)")
+                
+                # Pull data from peer using the determined timestamp
+                status_msg, data_list = self.pull_data_from_peer(peer_ip, peer_since)
                 
                 # Check if it was successful
                 if data_list or status_msg.startswith("Pulled"):
@@ -769,6 +832,49 @@ class SyncService:
               f"{len(results['errors'])} errors")
         
         return results
+    
+    def get_sync_log_status(self) -> List[Dict[str, Any]]:
+        """
+        Get sync_log status for all peers.
+        Returns a list of sync_log entries with readable timestamps.
+        """
+        try:
+            conn = sqlite3.connect(self.db_path)
+            conn.row_factory = sqlite3.Row
+            cursor = conn.cursor()
+            
+            cursor.execute('''
+                SELECT peer_node_id, last_known_ip, last_sync_at
+                FROM sync_log
+                ORDER BY last_sync_at DESC
+            ''')
+            
+            rows = cursor.fetchall()
+            conn.close()
+            
+            now_ms = int(datetime.now(timezone.utc).timestamp() * 1000)
+            
+            status_list = []
+            for row in rows:
+                last_sync_at = row['last_sync_at'] if row['last_sync_at'] else 0
+                age_ms = now_ms - last_sync_at if last_sync_at > 0 else None
+                
+                status_list.append({
+                    'peer_node_id': row['peer_node_id'],
+                    'last_known_ip': row['last_known_ip'],
+                    'last_sync_at': last_sync_at,
+                    'last_sync_at_readable': datetime.fromtimestamp(last_sync_at / 1000, tz=timezone.utc).isoformat() if last_sync_at > 0 else None,
+                    'sync_age_ms': age_ms,
+                    'sync_age_seconds': age_ms / 1000 if age_ms is not None else None
+                })
+            
+            return status_list
+            
+        except Exception as e:
+            print(f"SyncService: Error getting sync log status: {e}")
+            import traceback
+            traceback.print_exc()
+            return []
 
 
 # --- Singleton setup (matches cluster_service.py) ---
