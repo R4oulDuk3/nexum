@@ -30,8 +30,12 @@ export async function initMapControl(mapId, map) {
         try {
             const { getMapConfig } = await import('./map-config.js');
             const config = await getMapConfig(mapId);
-            // If no config, default to all types selected
-            const selectedTypes = config ? (config.entity_types_to_show || []) : ['responder', 'civilian', 'incident', 'resource', 'hazard'];
+            
+            // Default to all types if no config or empty config
+            const allTypes = ['responder', 'civilian', 'incident', 'resource', 'hazard'];
+            const selectedTypes = (config && config.entity_types_to_show && config.entity_types_to_show.length > 0) 
+                ? config.entity_types_to_show 
+                : allTypes;
 
             checkboxes.forEach(checkbox => {
                 checkbox.checked = selectedTypes.includes(checkbox.value);
@@ -54,12 +58,15 @@ export async function initMapControl(mapId, map) {
             isRefreshing = true;
             refreshBtn.disabled = true;
             refreshBtn.textContent = 'Refreshing...';
-            refreshBtn.style.background = '#9ca3af';
-            refreshBtn.style.cursor = 'wait';
 
             try {
                 const { refreshMapMarkers } = await import('./maplibre-map.js');
                 await refreshMapMarkers(map, mapId);
+                
+                // Update status bar if available
+                if (typeof window.updateStatusBar === 'function') {
+                    await window.updateStatusBar();
+                }
             } catch (error) {
                 console.error('Error refreshing map:', error);
                 alert('Error refreshing map: ' + error.message);
@@ -67,8 +74,6 @@ export async function initMapControl(mapId, map) {
                 isRefreshing = false;
                 refreshBtn.disabled = false;
                 refreshBtn.textContent = 'Refresh';
-                refreshBtn.style.background = '#3b82f6';
-                refreshBtn.style.cursor = 'pointer';
             }
         });
     }
@@ -82,8 +87,6 @@ export async function initMapControl(mapId, map) {
             isUpdating = true;
             updateConfigBtn.disabled = true;
             updateConfigBtn.textContent = 'Updating...';
-            updateConfigBtn.style.background = '#9ca3af';
-            updateConfigBtn.style.cursor = 'wait';
 
             try {
                 const { setEntityTypesToShow } = await import('./map-config.js');
@@ -101,8 +104,6 @@ export async function initMapControl(mapId, map) {
                 isUpdating = false;
                 updateConfigBtn.disabled = false;
                 updateConfigBtn.textContent = 'Update Config';
-                updateConfigBtn.style.background = '#10b981';
-                updateConfigBtn.style.cursor = 'pointer';
             }
         });
     }
@@ -116,8 +117,6 @@ export async function initMapControl(mapId, map) {
             isSyncing = true;
             syncBtn.disabled = true;
             syncBtn.textContent = 'Syncing...';
-            syncBtn.style.background = '#9ca3af';
-            syncBtn.style.cursor = 'wait';
 
             try {
                 const { syncAllNodes } = await import('./location-sync.js');
@@ -129,6 +128,11 @@ export async function initMapControl(mapId, map) {
 
                 // Refresh map markers after sync
                 await refreshMapMarkers(map, mapId);
+                
+                // Update status bar if available
+                if (typeof window.updateStatusBar === 'function') {
+                    await window.updateStatusBar();
+                }
 
                 // Show success message
                 if (result.errors && result.errors.length > 0) {
@@ -143,8 +147,6 @@ export async function initMapControl(mapId, map) {
                 isSyncing = false;
                 syncBtn.disabled = false;
                 syncBtn.textContent = 'Sync from Server';
-                syncBtn.style.background = '#8b5cf6';
-                syncBtn.style.cursor = 'pointer';
             }
         });
     }
