@@ -19,6 +19,30 @@
 
     <!-- Custom styles -->
     <style>
+        /* Ping animation for broadcast indicator */
+        @keyframes broadcast-ping {
+            0% {
+                transform: scale(1);
+                box-shadow: 0 0 0 0 rgba(59, 130, 246, 0.7);
+            }
+            50% {
+                transform: scale(1.05);
+                box-shadow: 0 0 0 8px rgba(59, 130, 246, 0);
+            }
+            100% {
+                transform: scale(1);
+                box-shadow: 0 0 0 0 rgba(59, 130, 246, 0);
+            }
+        }
+        
+        .broadcast-ping {
+            animation: broadcast-ping 0.6s ease-out;
+        }
+        
+        #headerBroadcastBtn {
+            pointer-events: none; /* Make it non-clickable */
+        }
+        
         {% block extra_css %}{% endblock %}
     </style>
     
@@ -120,17 +144,29 @@
                 
                 <!-- Right: Broadcast Button (always visible) + Desktop Navigation -->
                 <div class="flex items-center space-x-2 md:space-x-4">
-                    <!-- Broadcast Button - Prominent on Mobile -->
-                    <button 
+                    <!-- Broadcast Status Indicator - Shows GPS broadcasting status -->
+                    <div 
                         id="headerBroadcastBtn" 
-                        class="bg-green-600 hover:bg-green-700 active:bg-green-800 text-white px-3 py-2 md:px-4 md:py-2 rounded-md text-sm font-medium flex items-center shadow-lg transition-colors"
+                        class="bg-blue-600 text-white px-3 py-2 md:px-4 md:py-2 rounded-md text-sm font-medium flex items-center shadow-lg"
+                        role="status"
+                        aria-label="GPS Broadcasting Status"
                     >
                         <svg id="broadcastIcon" class="mr-1 md:mr-2 h-4 w-4 md:h-5 md:w-5" fill="currentColor" viewBox="0 0 24 24">
-                            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M15.536 8.464a5 5 0 010 7.072m2.828-9.9a9 9 0 010 12.728M5.586 15H4a1 1 0 01-1-1v-4a1 1 0 011-1h1.586l4.707-4.707C10.923 3.663 12 4.109 12 5v14c0 .891-1.077 1.337-1.707.707L5.586 15z"></path>
+                            <circle cx="12" cy="12" r="2" fill="currentColor" opacity="1">
+                                <animate attributeName="opacity" values="1;0.6;1" dur="1.5s" repeatCount="indefinite"/>
+                            </circle>
+                            <circle cx="12" cy="12" r="6" fill="none" stroke="currentColor" stroke-width="1.5" opacity="0.4">
+                                <animate attributeName="r" values="6;10;6" dur="1.5s" repeatCount="indefinite"/>
+                                <animate attributeName="opacity" values="0.4;0;0.4" dur="1.5s" repeatCount="indefinite"/>
+                            </circle>
+                            <circle cx="12" cy="12" r="10" fill="none" stroke="currentColor" stroke-width="1" opacity="0.3">
+                                <animate attributeName="r" values="10;14;10" dur="1.5s" repeatCount="indefinite" begin="0.25s"/>
+                                <animate attributeName="opacity" values="0.3;0;0.3" dur="1.5s" repeatCount="indefinite" begin="0.25s"/>
+                            </circle>
                         </svg>
-                        <span id="broadcastBtnText" class="hidden sm:inline">Start Broadcasting</span>
-                        <span id="broadcastBtnTextMobile" class="sm:hidden">Broadcast</span>
-                    </button>
+                        <span id="broadcastBtnText" class="hidden sm:inline">Broadcasting GPS</span>
+                        <span id="broadcastBtnTextMobile" class="sm:hidden">GPS</span>
+                    </div>
                     
                     <!-- Desktop Navigation (hidden on mobile) -->
                     <div class="hidden md:flex items-center space-x-4">

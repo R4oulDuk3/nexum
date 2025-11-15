@@ -1,11 +1,12 @@
 /**
- * Header Controls - Broadcast button and user type switch
+ * Header Controls - Broadcast status indicator and user type switch
  * 
  * Manages:
- * - Broadcast button to start/stop location tracking
+ * - Broadcast status indicator (shows GPS broadcasting status, auto-starts on load)
  * - User type switch (responder/civilian)
- * - localStorage persistence for both state and user type
- * - Auto-restore broadcast state on page load
+ * - localStorage persistence for user type
+ * - Auto-starts broadcasting when app opens
+ * - Ping animation on successful broadcast
  */
 
 // Import dependencies
@@ -14,7 +15,6 @@ import { LocationTracker } from './location-tracker.js';
 
 // Constants for localStorage keys
 const STORAGE_KEYS = {
-    BROADCASTING: 'location_broadcasting',
     USER_TYPE: 'user_role'  // Same as location-sender.js uses
 };
 
@@ -22,22 +22,6 @@ const STORAGE_KEYS = {
 let headerTracker = null;
 const TRACKING_INTERVAL = 5000; // 5 seconds
 
-/**
- * Check if broadcasting is enabled in localStorage
- * @returns {boolean} True if broadcasting is enabled
- */
-function isBroadcastingEnabled() {
-    const stored = localStorage.getItem(STORAGE_KEYS.BROADCASTING);
-    return stored === 'true';
-}
-
-/**
- * Set broadcasting state in localStorage
- * @param {boolean} enabled - Whether broadcasting is enabled
- */
-function setBroadcastingState(enabled) {
-    localStorage.setItem(STORAGE_KEYS.BROADCASTING, enabled.toString());
-}
 
 /**
  * Get user type from localStorage
@@ -56,43 +40,64 @@ function setUserType(userType) {
 }
 
 /**
- * Update broadcast button UI
- * @param {boolean} isBroadcasting - Whether currently broadcasting
+ * Update broadcast status indicator UI
+ * Shows broadcasting status with animated icon
  */
-function updateBroadcastButton(isBroadcasting) {
-    const btn = document.getElementById('headerBroadcastBtn');
-    const btnText = document.getElementById('broadcastBtnText');
+function updateBroadcastIndicator() {
+    const indicator = document.getElementById('headerBroadcastBtn');
+    const indicatorText = document.getElementById('broadcastBtnText');
     const icon = document.getElementById('broadcastIcon');
     
-    if (!btn) return;
+    if (!indicator) return;
     
-    if (isBroadcasting) {
-        btn.classList.remove('bg-green-600', 'hover:bg-green-700');
-        btn.classList.add('bg-red-600', 'hover:bg-red-700');
-        if (btnText) btnText.textContent = 'Stop Broadcasting';
-        
-        // Add pulse animation to icon - pulsing circle
-        if (icon) {
-            icon.setAttribute('fill', 'none');
-            icon.setAttribute('viewBox', '0 0 24 24');
-            icon.innerHTML = '<circle cx="12" cy="12" r="3" fill="currentColor" opacity="1"><animate attributeName="opacity" values="1;0.4;1" dur="1s" repeatCount="indefinite"/></circle><circle cx="12" cy="12" r="6" fill="none" stroke="currentColor" stroke-width="1.5" opacity="0.5"><animate attributeName="r" values="6;10;6" dur="1s" repeatCount="indefinite"/><animate attributeName="opacity" values="0.5;0;0.5" dur="1s" repeatCount="indefinite"/></circle>';
-        }
-    } else {
-        btn.classList.remove('bg-red-600', 'hover:bg-red-700');
-        btn.classList.add('bg-green-600', 'hover:bg-green-700');
-        if (btnText) btnText.textContent = 'Start Broadcasting';
-        
-        // Restore original icon (broadcast/waves icon)
-        if (icon) {
-            icon.setAttribute('fill', 'currentColor');
-            icon.setAttribute('viewBox', '0 0 24 24');
-            icon.innerHTML = '<path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M15.536 8.464a5 5 0 010 7.072m2.828-9.9a9 9 0 010 12.728M5.586 15H4a1 1 0 01-1-1v-4a1 1 0 011-1h1.586l4.707-4.707C10.923 3.663 12 4.109 12 5v14c0 .891-1.077 1.337-1.707.707L5.586 15z"></path>';
-        }
+    // Always show broadcasting state (since we auto-start)
+    indicator.classList.remove('bg-green-600', 'hover:bg-green-700', 'bg-red-600', 'hover:bg-red-700');
+    indicator.classList.add('bg-blue-600');
+    
+    if (indicatorText) {
+        indicatorText.textContent = 'Broadcasting GPS';
+    }
+    
+    // Show pulsing GPS indicator icon
+    if (icon) {
+        icon.setAttribute('fill', 'none');
+        icon.setAttribute('viewBox', '0 0 24 24');
+        icon.innerHTML = `
+            <circle cx="12" cy="12" r="2" fill="currentColor" opacity="1">
+                <animate attributeName="opacity" values="1;0.6;1" dur="1.5s" repeatCount="indefinite"/>
+            </circle>
+            <circle cx="12" cy="12" r="6" fill="none" stroke="currentColor" stroke-width="1.5" opacity="0.4">
+                <animate attributeName="r" values="6;10;6" dur="1.5s" repeatCount="indefinite"/>
+                <animate attributeName="opacity" values="0.4;0;0.4" dur="1.5s" repeatCount="indefinite"/>
+            </circle>
+            <circle cx="12" cy="12" r="10" fill="none" stroke="currentColor" stroke-width="1" opacity="0.3">
+                <animate attributeName="r" values="10;14;10" dur="1.5s" repeatCount="indefinite" begin="0.25s"/>
+                <animate attributeName="opacity" values="0.3;0;0.3" dur="1.5s" repeatCount="indefinite" begin="0.25s"/>
+            </circle>
+        `;
     }
 }
 
 /**
+ * Trigger ping animation on successful broadcast
+ * Creates a visual "ping" effect when data is sent successfully
+ */
+function triggerPingAnimation() {
+    const indicator = document.getElementById('headerBroadcastBtn');
+    if (!indicator) return;
+    
+    // Add ping animation class
+    indicator.classList.add('broadcast-ping');
+    
+    // Remove class after animation completes
+    setTimeout(() => {
+        indicator.classList.remove('broadcast-ping');
+    }, 600);
+}
+
+/**
  * Start location broadcasting
+ * Auto-starts on app initialization
  */
 function startBroadcasting() {
     if (headerTracker && headerTracker.isTracking) {
@@ -108,8 +113,9 @@ function startBroadcasting() {
     // Start tracking with callbacks
     headerTracker.start(
         (data) => {
-            // Success callback
+            // Success callback - trigger ping animation
             console.log('Location broadcasted:', data);
+            triggerPingAnimation();
         },
         (error) => {
             // Error callback
@@ -117,33 +123,18 @@ function startBroadcasting() {
         }
     );
     
-    // Update state and UI
-    setBroadcastingState(true);
-    updateBroadcastButton(true);
+    // Update UI
+    updateBroadcastIndicator();
 }
 
 /**
  * Stop location broadcasting
+ * Note: Not typically used since broadcasting auto-starts and is always on
  */
 function stopBroadcasting() {
     if (headerTracker) {
         headerTracker.stop();
         headerTracker = null;
-    }
-    
-    // Update state and UI
-    setBroadcastingState(false);
-    updateBroadcastButton(false);
-}
-
-/**
- * Toggle broadcasting state
- */
-function toggleBroadcasting() {
-    if (isBroadcastingEnabled()) {
-        stopBroadcasting();
-    } else {
-        startBroadcasting();
     }
 }
 
@@ -157,7 +148,7 @@ function handleUserTypeChange(event) {
     console.log('User type changed to:', userType);
     
     // If broadcasting, restart to use new role
-    if (isBroadcastingEnabled() && headerTracker) {
+    if (headerTracker && headerTracker.isTracking) {
         stopBroadcasting();
         // Small delay to ensure cleanup
         setTimeout(() => {
@@ -168,6 +159,7 @@ function handleUserTypeChange(event) {
 
 /**
  * Initialize header controls
+ * Auto-starts broadcasting when app opens
  */
 function initializeHeaderControls() {
     // Initialize user type switch
@@ -178,24 +170,21 @@ function initializeHeaderControls() {
         userTypeSwitch.addEventListener('change', handleUserTypeChange);
     }
     
-    // Initialize broadcast button
-    const broadcastBtn = document.getElementById('headerBroadcastBtn');
-    if (broadcastBtn) {
-        // Restore broadcasting state
-        const wasBroadcasting = isBroadcastingEnabled();
-        updateBroadcastButton(wasBroadcasting);
+    // Initialize broadcast status indicator
+    const broadcastIndicator = document.getElementById('headerBroadcastBtn');
+    if (broadcastIndicator) {
+        // Update UI to show broadcasting state
+        updateBroadcastIndicator();
         
-        // Set up click handler
-        broadcastBtn.addEventListener('click', toggleBroadcasting);
+        // Remove click handler - it's now just an indicator, not a button
+        broadcastIndicator.style.cursor = 'default';
         
-        // Auto-start if broadcasting was enabled
-        if (wasBroadcasting) {
-            console.log('Restoring broadcasting state...');
-            // Small delay to ensure everything is loaded
-            setTimeout(() => {
-                startBroadcasting();
-            }, 500);
-        }
+        // Auto-start broadcasting when app opens
+        console.log('Auto-starting GPS broadcasting...');
+        // Small delay to ensure everything is loaded
+        setTimeout(() => {
+            startBroadcasting();
+        }, 500);
     }
 }
 
@@ -203,11 +192,9 @@ function initializeHeaderControls() {
  * Cleanup on page unload
  */
 function cleanupHeaderControls() {
-    // Save state before unload (already saved, but ensure it's correct)
+    // Broadcasting always restarts on page load, no need to save state
     if (headerTracker && headerTracker.isTracking) {
-        setBroadcastingState(true);
-    } else {
-        setBroadcastingState(false);
+        headerTracker.stop();
     }
 }
 
@@ -228,12 +215,10 @@ if (typeof document !== 'undefined') {
 export {
     startBroadcasting,
     stopBroadcasting,
-    toggleBroadcasting,
-    isBroadcastingEnabled,
-    setBroadcastingState,
     getUserType,
     setUserType,
-    updateBroadcastButton,
+    updateBroadcastIndicator,
+    triggerPingAnimation,
     initializeHeaderControls
 };
 
@@ -241,12 +226,10 @@ export {
 export default {
     startBroadcasting,
     stopBroadcasting,
-    toggleBroadcasting,
-    isBroadcastingEnabled,
-    setBroadcastingState,
     getUserType,
     setUserType,
-    updateBroadcastButton,
+    updateBroadcastIndicator,
+    triggerPingAnimation,
     initializeHeaderControls
 };
 
@@ -255,12 +238,10 @@ if (typeof window !== 'undefined') {
     window.HeaderControls = {
         startBroadcasting,
         stopBroadcasting,
-        toggleBroadcasting,
-        isBroadcastingEnabled,
-        setBroadcastingState,
         getUserType,
         setUserType,
-        updateBroadcastButton
+        updateBroadcastIndicator,
+        triggerPingAnimation
     };
 }
 

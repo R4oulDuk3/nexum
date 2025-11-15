@@ -12,6 +12,16 @@
         border-radius: 8px;
         position: relative;
     }
+    
+    /* Drawer open state */
+    #map-controls-drawer.drawer-open {
+        transform: translateY(0);
+    }
+    
+    #drawer-backdrop.backdrop-visible {
+        opacity: 1;
+        pointer-events: auto;
+    }
 </style>
 {% endblock %}
 
@@ -24,24 +34,48 @@
     </div>
 
     <!-- Map Container -->
-    <div class="bg-white shadow rounded-lg p-4">
+    <div class="bg-white shadow rounded-lg p-4 relative">
         <!-- Status Bar -->
         <div id="status-bar" class="mb-4 p-3 bg-gray-50 rounded-lg border border-gray-200">
-            <div id="status-bar-content" class="flex flex-wrap items-center gap-4 md:gap-6">
-                <!-- Status items will be dynamically inserted here -->
-                <div class="text-sm text-gray-500">Loading...</div>
+            <div class="flex items-center justify-between gap-4">
+                <div id="status-bar-content" class="flex flex-wrap items-center gap-4 md:gap-6 flex-1">
+                    <!-- Status items will be dynamically inserted here -->
+                    <div class="text-sm text-gray-500">Loading...</div>
+                </div>
+                
+                <!-- Config Button -->
+                <button 
+                    id="open-controls-btn" 
+                    class="flex-shrink-0 bg-blue-600 text-white p-2 rounded-lg shadow hover:bg-blue-700 transition-colors"
+                    aria-label="Open map controls"
+                >
+                    <svg class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                        <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 6V4m0 2a2 2 0 100 4m0-4a2 2 0 110 4m-6 8a2 2 0 100-4m0 4a2 2 0 110-4m0 4v2m0-6V4m6 6v10m6-2a2 2 0 100-4m0 4a2 2 0 110-4m0 4v2m0-6V4"></path>
+                    </svg>
+                </button>
             </div>
         </div>
         
         <div id="dashboard-map" style="position: relative; width: 100%; height: calc(100vh - 200px); min-height: 600px;">
         </div>
-        
-        <!-- Map Controls - Below Map -->
-        <div class="mt-4">
+    </div>
+    
+    <!-- Bottom Drawer -->
+    <div id="map-controls-drawer" class="fixed inset-x-0 bottom-0 bg-white rounded-t-xl shadow-2xl transform translate-y-full transition-transform duration-300 ease-out z-50 max-h-[85vh] overflow-y-auto">
+        <div class="p-3">
+            <!-- Drawer Handle -->
+            <div class="flex justify-center mb-3">
+                <div class="w-12 h-1 bg-gray-300 rounded-full"></div>
+            </div>
+            
+            <!-- Map Controls Content -->
             {% set map_id = 'default' %}
             {% include 'components/map_control.html' %}
         </div>
     </div>
+    
+    <!-- Drawer Backdrop -->
+    <div id="drawer-backdrop" class="fixed inset-0 bg-black bg-opacity-50 opacity-0 pointer-events-none transition-opacity duration-300 z-40"></div>
 </div>
 {% endblock %}
 
@@ -82,8 +116,8 @@
                     return `
                         <div class="flex items-center gap-2">
                             <img src="${entity.icon}" alt="${entity.label}" class="w-5 h-5 object-contain" />
-                            <span class="font-medium text-gray-900">${entity.label}</span>
-                            <span class="text-gray-600">${count}</span>
+                            <span class="hidden md:inline font-medium text-gray-900">${entity.label}</span>
+                            <span class="text-gray-600 font-medium">${count}</span>
                         </div>
                     `;
                 }).join('');
@@ -102,10 +136,12 @@
             }
         }
         
+        // Make updateStatusBar globally accessible so map control can call it
+        window.updateStatusBar = updateStatusBar;
+        
         try {
             // Initial status bar update
             await updateStatusBar();
-            
             // Initialize map with mapId
             const mapInstance = await initMap({
                 containerId: 'dashboard-map',
@@ -113,8 +149,38 @@
                 mapId: 'default'
             });
             
-            // Make updateStatusBar globally accessible so map control can call it
-            window.updateStatusBar = updateStatusBar;
+            // Drawer controls
+            const drawer = document.getElementById('map-controls-drawer');
+            const backdrop = document.getElementById('drawer-backdrop');
+            const openBtn = document.getElementById('open-controls-btn');
+            
+            function openDrawer() {
+                drawer.classList.add('drawer-open');
+                backdrop.classList.add('backdrop-visible');
+                document.body.style.overflow = 'hidden';
+            }
+            
+            function closeDrawer() {
+                drawer.classList.remove('drawer-open');
+                backdrop.classList.remove('backdrop-visible');
+                document.body.style.overflow = '';
+            }
+            
+            openBtn.addEventListener('click', openDrawer);
+            backdrop.addEventListener('click', closeDrawer);
+            
+            // Close drawer button (inside drawer)
+            const closeBtn = document.getElementById('close-drawer-btn');
+            if (closeBtn) {
+                closeBtn.addEventListener('click', closeDrawer);
+            }
+            
+            // Close drawer on escape key
+            document.addEventListener('keydown', (e) => {
+                if (e.key === 'Escape' && drawer.classList.contains('drawer-open')) {
+                    closeDrawer();
+                }
+            });
             
             // Wait for map to load
             mapInstance.once('load', async () => {

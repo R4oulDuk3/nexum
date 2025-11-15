@@ -20,7 +20,6 @@ export async function initMapControl(mapId, map) {
         throw new Error(`Map control with id "map-control-${mapId}" not found`);
     }
 
-    const refreshBtn = document.getElementById(`refresh-btn-${mapId}`);
     const updateConfigBtn = document.getElementById(`update-config-btn-${mapId}`);
     const syncBtn = document.getElementById(`sync-btn-${mapId}`);
     const checkboxes = control.querySelectorAll('.entity-type-checkbox');
@@ -49,33 +48,20 @@ export async function initMapControl(mapId, map) {
         }
     }
 
-    // Refresh button handler
-    if (refreshBtn) {
-        let isRefreshing = false;
-        refreshBtn.addEventListener('click', async () => {
-            if (isRefreshing) return;
-
-            isRefreshing = true;
-            refreshBtn.disabled = true;
-            refreshBtn.textContent = 'Refreshing...';
-
-            try {
-                const { refreshMapMarkers } = await import('./maplibre-map.js');
-                await refreshMapMarkers(map, mapId);
-                
-                // Update status bar if available
-                if (typeof window.updateStatusBar === 'function') {
-                    await window.updateStatusBar();
-                }
-            } catch (error) {
-                console.error('Error refreshing map:', error);
-                alert('Error refreshing map: ' + error.message);
-            } finally {
-                isRefreshing = false;
-                refreshBtn.disabled = false;
-                refreshBtn.textContent = 'Refresh';
+    // Refresh map markers and update status bar
+    async function refreshMap() {
+        try {
+            const { refreshMapMarkers } = await import('./maplibre-map.js');
+            await refreshMapMarkers(map, mapId);
+            
+            // Update status bar if available
+            if (typeof window.updateStatusBar === 'function') {
+                await window.updateStatusBar();
             }
-        });
+        } catch (error) {
+            console.error('Error refreshing map:', error);
+            throw error;
+        }
     }
 
     // Update Config button handler
@@ -97,6 +83,9 @@ export async function initMapControl(mapId, map) {
 
                 await setEntityTypesToShow(mapId, selectedTypes);
                 console.log('Config updated for map:', mapId, selectedTypes);
+                
+                // Refresh map after config update
+                await refreshMap();
             } catch (error) {
                 console.error('Error updating map config:', error);
                 alert('Error updating config: ' + error.message);
@@ -120,19 +109,13 @@ export async function initMapControl(mapId, map) {
 
             try {
                 const { syncAllNodes } = await import('./location-sync.js');
-                const { refreshMapMarkers } = await import('./maplibre-map.js');
 
                 // Sync from server
                 const result = await syncAllNodes();
                 console.log('Sync completed:', result);
 
-                // Refresh map markers after sync
-                await refreshMapMarkers(map, mapId);
-                
-                // Update status bar if available
-                if (typeof window.updateStatusBar === 'function') {
-                    await window.updateStatusBar();
-                }
+                // Refresh map after sync
+                await refreshMap();
 
                 // Show success message
                 if (result.errors && result.errors.length > 0) {
@@ -156,9 +139,7 @@ export async function initMapControl(mapId, map) {
 
     // Expose methods
     control.refreshConfig = loadConfig;
-    control.refreshMap = async () => {
-        if (refreshBtn) refreshBtn.click();
-    };
+    control.refreshMap = refreshMap;
     control.updateConfig = async () => {
         if (updateConfigBtn) updateConfigBtn.click();
     };
