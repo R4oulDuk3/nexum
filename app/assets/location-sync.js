@@ -59,13 +59,18 @@ export async function syncWithNode(nodeId) {
         if (nodeSync && (now - nodeSync.last_sync_time) < 60000) {
             // Recent sync: get updates since last sync
             fromTimestamp = nodeSync.last_sync_time;
+            const age = ((now - fromTimestamp) / 1000).toFixed(1);
+            console.log(`[LocationSync] Node ${nodeId}: Using incremental sync (since ${age}s ago)`);
         } else {
             // Stale or new: get last 1 minute only
             fromTimestamp = oneMinuteAgo;
+            console.log(`[LocationSync] Node ${nodeId}: Using full sync (last 1 minute)`);
         }
         
         // Fetch data from node
+        console.log(`[LocationSync] Node ${nodeId}: Fetching data since timestamp ${fromTimestamp}...`);
         const locations = await fetchNodeData(nodeId, fromTimestamp);
+        console.log(`[LocationSync] Node ${nodeId}: Received ${locations.length} location(s)`);
         
         if (locations.length === 0) {
             // Update sync time even if no new data
@@ -73,10 +78,12 @@ export async function syncWithNode(nodeId) {
                 node_id: nodeId,
                 last_sync_time: now
             });
+            console.log(`[LocationSync] Node ${nodeId}: No new data, sync time updated`);
             return { success: true, count: 0 };
         }
         
         // Write to IndexedDB in transaction
+        console.log(`[LocationSync] Node ${nodeId}: Writing ${locations.length} location(s) to IndexedDB...`);
         await db.transaction('rw', db.locations, db.latest_locations, db.node_sync, async () => {
             // Write all locations
             await db.locations.bulkPut(locations);
@@ -99,10 +106,11 @@ export async function syncWithNode(nodeId) {
             });
         });
         
+        console.log(`[LocationSync] Node ${nodeId}: Successfully synced ${locations.length} location(s)`);
         return { success: true, count: locations.length };
         
     } catch (error) {
-        console.error(`Error syncing with node ${nodeId}:`, error);
+        console.error(`[LocationSync] Node ${nodeId}: Error during sync:`, error);
         return { 
             success: false, 
             count: 0, 
@@ -116,17 +124,27 @@ export async function syncWithNode(nodeId) {
  * @returns {Promise<{synced: number, total: number, errors: Array}>}
  */
 export async function syncAllNodes() {
+    const syncStartTime = Date.now();
+    console.log('[LocationSync] Starting sync with all nodes...');
+    
     try {
         // Get list of all nodes
+        console.log('[LocationSync] Fetching node list...');
         const nodeIds = await fetchNodeList();
+        console.log(`[LocationSync] Found ${nodeIds.length} node(s):`, nodeIds);
         
         if (nodeIds.length === 0) {
-            return { synced: 0, total: 0, errors: [] };
+            console.log('[LocationSync] No nodes found, skipping sync');
+            return { synced: 0, total: 0, totalCount: 0, errors: [] };
         }
         
         // Sync with each node
+        console.log(`[LocationSync] Syncing with ${nodeIds.length} node(s)...`);
         const results = await Promise.allSettled(
-            nodeIds.map(nodeId => syncWithNode(nodeId))
+            nodeIds.map(nodeId => {
+                console.log(`[LocationSync] Starting sync with node: ${nodeId}`);
+                return syncWithNode(nodeId);
+            })
         );
         
         // Count successes and errors
@@ -141,13 +159,21 @@ export async function syncAllNodes() {
                 if (data.success) {
                     synced++;
                     totalCount += data.count;
+                    console.log(`[LocationSync] ✓ Node ${nodeId}: ${data.count} location(s) synced`);
                 } else {
-                    errors.push({ nodeId, error: data.error || 'Unknown error' });
+                    const errorMsg = data.error || 'Unknown error';
+                    console.warn(`[LocationSync] ✗ Node ${nodeId} failed: ${errorMsg}`);
+                    errors.push({ nodeId, error: errorMsg });
                 }
             } else {
-                errors.push({ nodeId, error: result.reason?.message || String(result.reason) });
+                const errorMsg = result.reason?.message || String(result.reason);
+                console.error(`[LocationSync] ✗ Node ${nodeId} exception: ${errorMsg}`);
+                errors.push({ nodeId, error: errorMsg });
             }
         });
+        
+        const syncDuration = Date.now() - syncStartTime;
+        console.log(`[LocationSync] Sync completed in ${syncDuration}ms: ${synced}/${nodeIds.length} nodes synced, ${totalCount} total locations, ${errors.length} errors`);
         
         return {
             synced,
@@ -157,7 +183,8 @@ export async function syncAllNodes() {
         };
         
     } catch (error) {
-        console.error('Error syncing all nodes:', error);
+        const syncDuration = Date.now() - syncStartTime;
+        console.error(`[LocationSync] Sync failed after ${syncDuration}ms:`, error);
         throw error;
     }
 }

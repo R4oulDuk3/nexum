@@ -146,7 +146,7 @@
             const mapInstance = await initMap({
                 containerId: 'dashboard-map',
                 showControls: true,
-                mapId: 'default'
+                mapId: 'dashboard-map'
             });
             
             // Drawer controls
@@ -193,6 +193,33 @@
                 
                 // Update status bar after refresh
                 await updateStatusBar();
+                
+                // Start automatic map refresh every 5 seconds
+                console.log('[MapRefresh] Starting automatic map refresh (interval: 5s)');
+                let mapRefreshInterval = setInterval(async () => {
+                    try {
+                        console.log('[MapRefresh] Automatic refresh triggered');
+                        await refreshMapMarkers(mapInstance, 'default');
+                        // Update status bar after refresh
+                        if (typeof updateStatusBar === 'function') {
+                            await updateStatusBar();
+                        }
+                    } catch (error) {
+                        console.error('[MapRefresh] Error during automatic refresh:', error);
+                    }
+                }, 5000); // 5 seconds
+                
+                // Store interval ID for potential cleanup
+                window.mapRefreshInterval = mapRefreshInterval;
+            });
+            
+            // Cleanup interval on page unload
+            window.addEventListener('beforeunload', () => {
+                if (window.mapRefreshInterval) {
+                    console.log('[MapRefresh] Stopping automatic map refresh');
+                    clearInterval(window.mapRefreshInterval);
+                    window.mapRefreshInterval = null;
+                }
             });
            
             

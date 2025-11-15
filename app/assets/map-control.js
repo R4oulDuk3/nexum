@@ -66,6 +66,7 @@ export async function initMapControl(mapId, map) {
 
     // Update Config button handler
     if (updateConfigBtn) {
+        console.log('Update Config button found');
         let isUpdating = false;
         updateConfigBtn.addEventListener('click', async () => {
             if (isUpdating) return;
@@ -95,10 +96,14 @@ export async function initMapControl(mapId, map) {
                 updateConfigBtn.textContent = 'Update Config';
             }
         });
+    } else {
+        log.console.warn('Update Config button not found');
+        
     }
 
     // Sync button handler
     if (syncBtn) {
+        console.log('Sync button found');
         let isSyncing = false;
         syncBtn.addEventListener('click', async () => {
             if (isSyncing) return;
@@ -132,6 +137,8 @@ export async function initMapControl(mapId, map) {
                 syncBtn.textContent = 'Sync from Server';
             }
         });
+    } else {
+        console.warn('Sync button not found');
     }
 
     // Load initial config
