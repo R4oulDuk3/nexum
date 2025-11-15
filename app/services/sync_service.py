@@ -182,6 +182,7 @@ class SyncService:
         Returns 0 if no sync_log entry exists for this peer.
         """
         try:
+            print(f"\n  [get_last_sync_time] Called for peer_node_id: '{peer_node_id}'")
             conn = sqlite3.connect(self.db_path)
             conn.row_factory = sqlite3.Row
             cursor = conn.cursor()
@@ -191,21 +192,36 @@ class SyncService:
             table_exists = cursor.fetchone()
             
             if not table_exists:
-                print(f"SyncService: WARNING - sync_log table does not exist!")
+                print(f"  [get_last_sync_time] ✗ WARNING - sync_log table does not exist!")
                 conn.close()
                 return 0
             
+            print(f"  [get_last_sync_time] ✓ sync_log table exists")
+            
             # Query the sync_log table
-            cursor.execute('SELECT last_sync_at, last_known_ip FROM sync_log WHERE peer_node_id = ?', (peer_node_id,))
+            query = 'SELECT last_sync_at, last_known_ip FROM sync_log WHERE peer_node_id = ?'
+            print(f"  [get_last_sync_time] Executing query: {query}")
+            print(f"  [get_last_sync_time] With parameter: peer_node_id='{peer_node_id}'")
+            cursor.execute(query, (peer_node_id,))
             row = cursor.fetchone()
             
             if row:
                 last_sync_at = row['last_sync_at'] if row['last_sync_at'] else 0
                 last_ip = row['last_known_ip'] if row['last_known_ip'] else 'unknown'
+                print(f"  [get_last_sync_time] ✓ Found entry: last_sync_at={last_sync_at}, last_known_ip='{last_ip}'")
                 conn.close()
                 return last_sync_at
             else:
                 # No entry in sync_log yet
+                print(f"  [get_last_sync_time] ✗ No entry found for peer_node_id='{peer_node_id}'")
+                
+                # Debug: Show all entries in sync_log
+                cursor.execute('SELECT peer_node_id, last_known_ip, last_sync_at FROM sync_log')
+                all_rows = cursor.fetchall()
+                print(f"  [get_last_sync_time] All entries in sync_log ({len(all_rows)} total):")
+                for idx, r in enumerate(all_rows, 1):
+                    print(f"    {idx}. peer_node_id='{r[0]}', IP='{r[1]}', last_sync_at={r[2]}")
+                
                 conn.close()
                 return 0
         except sqlite3.Error as e:
@@ -519,38 +535,49 @@ class SyncService:
             - saved_count: Number of reports successfully saved
             - skipped_count: Number of reports skipped (duplicates or errors)
         """
+        print(f"  [save_location_reports] Called with {len(reports)} reports")
         saved_count = 0
         skipped_count = 0
         
-        for report_dict in reports:
+        for idx, report_dict in enumerate(reports, 1):
             try:
+                print(f"  [save_location_reports] Processing report {idx}/{len(reports)}: ID={report_dict.get('id')}")
+                
                 # Convert dict to LocationReport object
                 report = LocationReport.from_dict(report_dict)
+                print(f"  [save_location_reports] Converted to LocationReport object: id={report.id}, node_id='{report.node_id}'")
                 
                 # Check if this report already exists (by id)
                 try:
                     conn = sqlite3.connect(self.db_path)
                     cursor = conn.cursor()
-                    cursor.execute('SELECT id FROM location_reports WHERE id = ?', (str(report.id),))
+                    query = 'SELECT id FROM location_reports WHERE id = ?'
+                    print(f"  [save_location_reports] Checking for duplicate: {query} with id='{str(report.id)}'")
+                    cursor.execute(query, (str(report.id),))
                     exists = cursor.fetchone()
                     conn.close()
                     
                     if exists:
-                        print(f"  Skipping duplicate report ID: {report.id}")
+                        print(f"  [save_location_reports] ✗ Skipping duplicate report ID: {report.id}")
                         skipped_count += 1
                         continue
+                    else:
+                        print(f"  [save_location_reports] ✓ Report ID {report.id} not found in DB, will save")
                 except Exception as e:
-                    print(f"  Warning: Error checking for duplicate report {report.id}: {e}")
+                    print(f"  [save_location_reports] Warning: Error checking for duplicate report {report.id}: {e}")
                     # Continue anyway - try to save and catch duplicate error
                 
                 # Save the report using LocationService
                 # Wrap in try/except to catch IntegrityError if duplicate somehow gets through
                 try:
+                    print(f"  [save_location_reports] Calling location_service.add_location() for report {report.id}...")
                     self.location_service.add_location(report)
                     saved_count += 1
-                except sqlite3.IntegrityError:
+                    print(f"  [save_location_reports] ✓ Successfully saved report ID: {report.id}")
+                except sqlite3.IntegrityError as e:
                     # Duplicate primary key - already exists
-                    print(f"  Skipping duplicate report ID (integrity error): {report.id}")
+                    print(f"  [save_location_reports] ✗ Skipping duplicate report ID (integrity error): {report.id}")
+                    print(f"    Error: {e}")
                     skipped_count += 1
                 
             except Exception as e:
@@ -1098,15 +1125,19 @@ class SyncService:
                 # Determine which timestamp to use
                 if use_sync_log and since_timestamp is None:
                     # Use sync_log timestamp for this peer
+                    print(f"\nTest: Determining timestamp for peer {peer_mac} ({peer_ip})...")
                     peer_since = self.get_last_sync_time(peer_mac)
+                    print(f"  get_last_sync_time() returned: {peer_since}")
+                    
                     if peer_since > 0:
                         age_seconds = (int(datetime.now(timezone.utc).timestamp() * 1000) - peer_since) / 1000
                         print(f"\nTest: Attempting to pull from peer {peer_mac} ({peer_ip})...")
-                        print(f"  Using sync_log timestamp: {peer_since} ({age_seconds:.1f}s ago)")
+                        print(f"  ✓ Using sync_log timestamp: {peer_since} ({age_seconds:.1f}s ago)")
                     else:
                         peer_since = 0
                         print(f"\nTest: Attempting to pull from peer {peer_mac} ({peer_ip})...")
-                        print(f"  No sync_log entry found, using since=0 (full sync)")
+                        print(f"  ✗ sync_log returned timestamp=0, using since=0 (full sync)")
+                        print(f"  Note: This could mean either no entry exists or entry has timestamp=0")
                 elif since_timestamp is not None:
                     # Use provided timestamp for all peers
                     peer_since = since_timestamp
@@ -1122,7 +1153,15 @@ class SyncService:
                 status_msg, data_list = self.pull_data_from_peer(peer_ip, peer_since)
                 
                 # Check if it was successful
-                if data_list or status_msg.startswith("Pulled"):
+                print(f"\nTest: Checking if pull was successful...")
+                print(f"  data_list: {data_list} (type: {type(data_list)}, length: {len(data_list) if data_list else 0})")
+                print(f"  status_msg: '{status_msg}'")
+                print(f"  status_msg.startswith('Pulled'): {status_msg.startswith('Pulled') if status_msg else False}")
+                
+                is_successful = data_list or (status_msg and status_msg.startswith("Pulled"))
+                print(f"  Pull successful? {is_successful}")
+                
+                if is_successful:
                     # Save the location reports to database
                     if data_list:
                         # Print pulled data for testing
@@ -1140,6 +1179,7 @@ class SyncService:
                                 print(f"    Metadata: {report.get('metadata')}")
                         print()  # Empty line for readability
                         
+                        print(f"Test: Saving {len(data_list)} reports to database...")
                         saved_count, skipped_count = self.save_location_reports(data_list)
                         results["total_reports_pulled"] += len(data_list)
                         results["total_reports_saved"] += saved_count
@@ -1149,9 +1189,12 @@ class SyncService:
                         results["messages"].append(msg)
                         print(f"Test: ✓ Successfully pulled and saved data from {peer_mac}")
                         print(f"      {msg}")
+                        print(f"      NOTE: test_pull_all_peers() does NOT update sync_log (by design)")
+                        print(f"      To update sync_log, use POST /api/sync endpoint instead")
                     else:
                         results["messages"].append(f"Peer {peer_mac} ({peer_ip}): {status_msg}")
                         print(f"Test: ✓ Successfully pulled from {peer_mac} (no new data)")
+                        print(f"      NOTE: test_pull_all_peers() does NOT update sync_log (by design)")
                 else:
                     error_msg = f"Peer {peer_mac} ({peer_ip}): {status_msg}"
                     results["errors"].append(error_msg)
