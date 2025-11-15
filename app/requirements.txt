@@ -7,4 +7,5 @@ marshmallow-enum==1.5.1
 apispec==6.3.0
 apispec-webframeworks==0.5.2
 webargs==8.3.0
+requests>=2.31.0
 
