@@ -14,7 +14,7 @@ from services.mbtiles_service import MBTilesService
 tiles_bp = Blueprint('tiles', __name__, url_prefix='/api/tiles')
 
 # Path to MBTiles file
-MBTILES_FILE = os.path.join(os.path.dirname(__file__), '..', 'tiles', 'berlin_tiles2.mbtiles')
+MBTILES_FILE = os.path.join(os.path.dirname(__file__), '..', 'tiles', 'berlin_tiles3.mbtiles')
 
 # Initialize service
 mbtiles_service = None
