@@ -224,6 +224,43 @@ class SyncService:
         except Exception as e:
             print(f"SyncService: Error updating sync time for {peer_node_id}: {e}")
     
+    def _extract_connection_error_type(self, error: Exception) -> str:
+        """
+        Extract a more specific error type from connection errors.
+        
+        Returns:
+            A concise error description (e.g., "No route to host", "Connection refused", etc.)
+        """
+        error_str = str(error).lower()
+        
+        # Check for common routing/network errors
+        if "no route to host" in error_str or "errno 113" in error_str:
+            return "No route to host (check mesh network routing)"
+        elif "connection refused" in error_str or "errno 111" in error_str:
+            return "Connection refused (peer may not be running service on port 5000)"
+        elif "name or service not known" in error_str or "nodename nor servname" in error_str:
+            return "DNS/hostname resolution failed"
+        elif "network is unreachable" in error_str or "errno 101" in error_str:
+            return "Network unreachable"
+        elif "connection timed out" in error_str or "timed out" in error_str:
+            return "Connection timeout (peer may be slow or unreachable)"
+        elif "timeout" in error_str:
+            return "Request timeout"
+        else:
+            # Return a shorter version of the full error
+            error_msg = str(error)
+            # Try to extract the most relevant part
+            if "HTTPConnectionPool" in error_msg:
+                # Extract the reason from the HTTPConnectionPool error
+                if "Failed to establish" in error_msg:
+                    # Try to get the actual error reason
+                    if ":" in error_msg:
+                        parts = error_msg.split(":")
+                        if len(parts) > 1:
+                            reason = parts[-1].strip()
+                            return f"Connection failed: {reason}"
+            return f"Connection error: {error_msg[:150]}"  # Limit length
+    
     def pull_data_from_peer(self, peer_ip: str, since_timestamp: int) -> Tuple[str, List[Dict[str, Any]]]:
         """
         Pulls new data from a peer's /api/sync endpoint.
@@ -262,15 +299,18 @@ class SyncService:
             return (f"Pulled {count} new reports from {peer_ip}", data_list)
             
         except requests.exceptions.Timeout:
-            error_msg = f"Timeout connecting to {peer_ip}"
+            error_msg = f"Timeout connecting to {peer_ip} (peer may be slow or unreachable)"
             print(f"  Error: {error_msg}")
             return (error_msg, [])
         except requests.exceptions.ConnectionError as e:
-            error_msg = f"Connection error to {peer_ip}: {str(e)}"
+            # Extract more specific error information
+            specific_error = self._extract_connection_error_type(e)
+            error_msg = f"Connection error to {peer_ip}: {specific_error}"
             print(f"  Error: {error_msg}")
+            print(f"  Full error details: {str(e)}")
             return (error_msg, [])
         except requests.exceptions.RequestException as e:
-            error_msg = f"Request failed: {str(e)}"
+            error_msg = f"Request failed to {peer_ip}: {str(e)[:200]}"
             print(f"  Error: {error_msg}")
             return (error_msg, [])
         except json.JSONDecodeError as e:
