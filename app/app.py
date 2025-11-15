@@ -493,5 +493,21 @@ if __name__ == '__main__':
         print(f"  To find your IP, run: ip addr show")
         print(f"{'='*60}\n")
     
-    app.run(host=host, port=port, debug=True)
+    # Start background sync scheduler
+    from services.sync_scheduler import get_sync_scheduler
+    sync_scheduler = get_sync_scheduler()
+    sync_scheduler.start()
+    
+    print(f"Sync Scheduler Status:")
+    status = sync_scheduler.get_status()
+    print(f"  Enabled: {status['enabled']}")
+    print(f"  Interval: {status['interval_seconds']} seconds")
+    print(f"  Running: {status['running']}")
+    print()
+    
+    try:
+        app.run(host=host, port=port, debug=True)
+    finally:
+        # Stop scheduler when Flask shuts down
+        sync_scheduler.stop()
 

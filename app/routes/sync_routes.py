@@ -390,10 +390,22 @@ def get_sync_status():
     try:
         sync_log = sync_service.get_sync_log_status()
         
-        return jsonify({
+        # Include scheduler status if available
+        try:
+            from services.sync_scheduler import get_sync_scheduler
+            scheduler_status = get_sync_scheduler().get_status()
+        except Exception:
+            scheduler_status = None
+        
+        response = {
             'status': 'success',
             'sync_log': sync_log
-        })
+        }
+        
+        if scheduler_status:
+            response['scheduler'] = scheduler_status
+        
+        return jsonify(response)
         
     except Exception as e:
         return jsonify({
