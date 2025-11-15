@@ -27,7 +27,7 @@ def handle_options(path):
     return Response(status=200)
 
 # Path to vector MBTiles file (PBF format)
-VECTOR_MBTILES_FILE = os.path.join(os.path.dirname(__file__), '..', 'tiles', 'berlin_tiles2.mbtiles')
+VECTOR_MBTILES_FILE = os.path.join(os.path.dirname(__file__), '..', 'tiles', 'berlin_tiles3.mbtiles')
 
 # Initialize service
 vector_tiles_service = None
