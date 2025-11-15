@@ -644,8 +644,8 @@ function removeAllTraces(map) {
  */
 function getEntityTypeColor(entityType) {
     const colors = {
-        'responder': '#3b82f6',    // blue
-        'civilian': '#10b981',     // green
+        'responder': '#ef4444',    // red
+        'civilian': '#3b82f6',     // blue
         'incident': '#ef4444',     // red
         'resource': '#f97316',     // orange
         'hazard': '#a855f7'        // purple
@@ -665,11 +665,34 @@ function drawTraces(map, groupedByEntity, entityTypes = null) {
     let tracesDrawn = 0;
     let skipped = 0;
     
+    // Static entity types that don't move (no traces needed)
+    const staticEntityTypes = ['incident', 'hazard', 'resource'];
+    
     groupedByEntity.forEach((locations, entityId) => {
+        // Get entity type from first location
+        const firstLocation = locations[0];
+        if (!firstLocation) {
+            skipped++;
+            return;
+        }
+        
+        const entityType = firstLocation.entity_type;
+        
+        // Skip static entities (incidents, hazards, resources) - they don't move
+        if (staticEntityTypes.includes(entityType)) {
+            skipped++;
+            return;
+        }
+        
+        // Only draw traces for moving entities (responders and civilians)
+        if (entityType !== 'responder' && entityType !== 'civilian') {
+            skipped++;
+            return;
+        }
+        
         // Filter by entity types if provided
         if (entityTypes && entityTypes.length > 0) {
-            const firstLocation = locations[0];
-            if (!firstLocation || !entityTypes.includes(firstLocation.entity_type)) {
+            if (!entityTypes.includes(entityType)) {
                 return; // Skip this entity
             }
         }
