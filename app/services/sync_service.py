@@ -292,30 +292,82 @@ class SyncService:
         and created_at is greater than since_timestamp.
         """
         my_node_id = self.get_my_node_id()
-        print(f"SyncService: get_own_data_since() - My node ID: {my_node_id}, since: {since_timestamp}")
+        print(f"\n{'='*60}")
+        print(f"SyncService: get_own_data_since() - DEBUG INFO")
+        print(f"{'='*60}")
+        print(f"SyncService: My node ID from get_my_node_id(): '{my_node_id}'")
+        print(f"SyncService: My node ID type: {type(my_node_id)}")
+        print(f"SyncService: My node ID length: {len(my_node_id)}")
+        print(f"SyncService: My node ID repr: {repr(my_node_id)}")
+        print(f"SyncService: Since timestamp: {since_timestamp}")
+        print(f"{'='*60}\n")
         
         try:
             conn = sqlite3.connect(self.db_path)
             conn.row_factory = sqlite3.Row
             cursor = conn.cursor()
             
-            # First, let's check what node_ids exist in the database
-            cursor.execute('SELECT DISTINCT node_id FROM location_reports')
-            all_node_ids = [row[0] for row in cursor.fetchall()]
-            print(f"SyncService: All node_ids in database: {all_node_ids}")
-            
             # Check total count of reports
             cursor.execute('SELECT COUNT(*) FROM location_reports')
             total_count = cursor.fetchone()[0]
-            print(f"SyncService: Total location reports in database: {total_count}")
+            print(f"SyncService: Total location reports in database: {total_count}\n")
+            
+            # Get ALL entries from the database to see what's stored
+            print(f"SyncService: {'-'*60}")
+            print(f"SyncService: ALL ENTRIES IN DATABASE:")
+            print(f"SyncService: {'-'*60}")
+            cursor.execute('SELECT id, node_id, entity_type, entity_id, created_at FROM location_reports ORDER BY created_at')
+            all_rows = cursor.fetchall()
+            
+            if len(all_rows) == 0:
+                print("SyncService:   (No entries found)")
+            else:
+                for idx, row in enumerate(all_rows, 1):
+                    print(f"SyncService:   Entry {idx}:")
+                    print(f"SyncService:     ID: {row['id']}")
+                    print(f"SyncService:     node_id: '{row['node_id']}' (type: {type(row['node_id'])}, len: {len(row['node_id'])})")
+                    print(f"SyncService:     node_id repr: {repr(row['node_id'])}")
+                    print(f"SyncService:     entity_type: {row['entity_type']}")
+                    print(f"SyncService:     entity_id: {row['entity_id']}")
+                    print(f"SyncService:     created_at: {row['created_at']}")
+                    
+                    # Compare with my_node_id
+                    matches_exact = row['node_id'] == my_node_id
+                    matches_lower = row['node_id'].lower() == my_node_id.lower()
+                    print(f"SyncService:     Matches my node_id exactly: {matches_exact}")
+                    print(f"SyncService:     Matches my node_id (case-insensitive): {matches_lower}")
+                    if matches_lower and not matches_exact:
+                        print(f"SyncService:     ⚠ CASE MISMATCH DETECTED!")
+                    print()
+            
+            print(f"SyncService: {'-'*60}\n")
+            
+            # First, let's check what node_ids exist in the database
+            cursor.execute('SELECT DISTINCT node_id FROM location_reports')
+            all_node_ids = [row[0] for row in cursor.fetchall()]
+            print(f"SyncService: Unique node_ids in database: {all_node_ids}")
+            print(f"SyncService: Unique node_ids count: {len(all_node_ids)}")
+            for db_node_id in all_node_ids:
+                print(f"SyncService:   - '{db_node_id}' (repr: {repr(db_node_id)}, len: {len(db_node_id)})")
+            print()
             
             # Check count for our node_id
             cursor.execute('SELECT COUNT(*) FROM location_reports WHERE node_id = ?', (my_node_id,))
             my_count = cursor.fetchone()[0]
-            print(f"SyncService: Location reports for my node_id ({my_node_id}): {my_count}")
+            print(f"SyncService: Location reports matching my node_id exactly ('{my_node_id}'): {my_count}")
+            
+            # Try case-insensitive match
+            cursor.execute('''
+                SELECT COUNT(*) FROM location_reports 
+                WHERE LOWER(node_id) = LOWER(?)
+            ''', (my_node_id,))
+            my_count_case_insensitive = cursor.fetchone()[0]
+            print(f"SyncService: Location reports matching my node_id (case-insensitive): {my_count_case_insensitive}")
+            print()
             
             # Query location_reports for this node_id with created_at > since_timestamp
-            print(f"SyncService: Executing query: node_id='{my_node_id}', created_at > {since_timestamp}")
+            print(f"SyncService: Executing query:")
+            print(f"SyncService:   WHERE node_id = '{my_node_id}' AND created_at > {since_timestamp}")
             cursor.execute('''
                 SELECT * FROM location_reports
                 WHERE node_id = ? AND created_at > ?
@@ -323,27 +375,19 @@ class SyncService:
             ''', (my_node_id, since_timestamp))
             
             rows = cursor.fetchall()
-            print(f"SyncService: Query returned {len(rows)} rows")
+            print(f"SyncService: Query returned {len(rows)} rows\n")
             
-            # If no rows, let's check if it's a case sensitivity or format issue
-            if len(rows) == 0 and my_count > 0:
-                print(f"SyncService: WARNING: Found {my_count} reports for node_id but query returned 0!")
-                print(f"SyncService: Checking if node_id format matches...")
-                # Try case-insensitive match
+            # If no rows but we found matches, try case-insensitive
+            if len(rows) == 0 and my_count_case_insensitive > 0:
+                print(f"SyncService: ⚠ WARNING: Exact match found 0, but case-insensitive found {my_count_case_insensitive}!")
+                print(f"SyncService: Trying case-insensitive query...")
                 cursor.execute('''
-                    SELECT node_id, COUNT(*) as cnt 
-                    FROM location_reports 
-                    GROUP BY node_id
-                ''')
-                node_id_counts = cursor.fetchall()
-                print(f"SyncService: Node ID breakdown:")
-                for row in node_id_counts:
-                    node_id_val = row[0]
-                    count = row[1]
-                    match = "✓" if node_id_val == my_node_id else "✗"
-                    print(f"SyncService:   {match} '{node_id_val}' (count: {count})")
-                    if node_id_val.lower() == my_node_id.lower() and node_id_val != my_node_id:
-                        print(f"SyncService:   ⚠ Case mismatch detected!")
+                    SELECT * FROM location_reports
+                    WHERE LOWER(node_id) = LOWER(?) AND created_at > ?
+                    ORDER BY created_at ASC
+                ''', (my_node_id, since_timestamp))
+                rows = cursor.fetchall()
+                print(f"SyncService: Case-insensitive query returned {len(rows)} rows\n")
             
             conn.close()
             
