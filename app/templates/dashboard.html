@@ -63,12 +63,34 @@
     <!-- Debug Section -->
     <div class="mt-4 p-4 bg-gray-50 border border-gray-200 rounded-lg">
         <div class="text-sm font-semibold text-gray-600 mb-2">Debug</div>
-        <button 
-            id="sync-btn-default" 
-            class="px-4 py-2 bg-purple-600 text-white border-none rounded-md text-sm font-medium cursor-pointer transition-colors hover:bg-purple-700 disabled:bg-gray-400 disabled:cursor-wait"
-        >
-            Sync from Server
-        </button>
+        <div class="flex gap-2 flex-wrap">
+            <button 
+                id="sync-btn-default" 
+                class="px-4 py-2 bg-purple-600 text-white border-none rounded-md text-sm font-medium cursor-pointer transition-colors hover:bg-purple-700 disabled:bg-gray-400 disabled:cursor-wait"
+            >
+                Sync from Server
+            </button>
+            <button 
+                id="deepSyncButton" 
+                onclick="triggerDeepSync()"
+                class="px-4 py-2 bg-purple-600 text-white border-none rounded-md text-sm font-medium cursor-pointer transition-colors hover:bg-purple-700 disabled:bg-gray-400 disabled:cursor-wait"
+            >
+                Deep Sync (Last 3 Hours)
+            </button>
+            <button 
+                id="clearDbButton" 
+                onclick="clearLocalState()"
+                class="px-4 py-2 bg-red-600 text-white border-none rounded-md text-sm font-medium cursor-pointer transition-colors hover:bg-red-700 disabled:bg-gray-400 disabled:cursor-wait"
+            >
+                Clear Local State
+            </button>
+        </div>
+        <div id="debugProgress" class="mt-3 p-3 bg-white border border-gray-300 rounded-lg hidden">
+            <div class="flex items-center mb-2">
+                <span id="debugStatus" class="text-sm font-medium">Processing...</span>
+            </div>
+            <div id="debugDetails" class="text-sm text-gray-600"></div>
+        </div>
     </div>
     
     <!-- Bottom Drawer -->
@@ -117,6 +139,9 @@
         const { initMapControl } = await import("{{ url_for('static', filename='map-control.js') }}");
         const { refreshMapMarkers } = await import("{{ url_for('static', filename='maplibre-map.js') }}");
         const { getLocationStats } = await import("{{ url_for('static', filename='location-reader.js') }}");
+        const { deepSyncAllNodes } = await import("{{ url_for('static', filename='location-sync.js') }}");
+        const dbModule = await import("{{ url_for('static', filename='location-sync-db.js') }}");
+        const db = dbModule.default;
         console.log('[Dashboard] All modules imported successfully');
         
         // Update status bar with entity counts
@@ -186,6 +211,9 @@
             const mapId = 'default';
             console.log(`[Dashboard] Using mapId: ${mapId}`);
             
+            // Store mapId globally for debug functions
+            window.mapId = mapId;
+            
             // Initial status bar update
             console.log('[Dashboard] Performing initial status bar update...');
             await updateStatusBar();
@@ -198,6 +226,9 @@
                 mapId: mapId
             });
             console.log('[Dashboard] Map instance created successfully');
+            
+            // Store mapInstance globally for debug functions
+            window.mapInstance = mapInstance;
             
             // Verify and setup drawer controls with defensive checks
             console.log('[Dashboard] Setting up drawer controls...');
@@ -376,6 +407,111 @@
                 window.mapRefreshInterval = null;
             }
         });
+        
+        // Deep sync (last 3 hours)
+        window.triggerDeepSync = async function() {
+            const button = document.getElementById('deepSyncButton');
+            const progress = document.getElementById('debugProgress');
+            const status = document.getElementById('debugStatus');
+            const details = document.getElementById('debugDetails');
+            
+            button.disabled = true;
+            button.textContent = 'Syncing...';
+            progress.classList.remove('hidden');
+            status.textContent = 'Deep syncing with all nodes (last 3 hours)...';
+            details.textContent = '';
+            
+            try {
+                const now = Date.now();
+                const threeHoursAgo = now - (3 * 60 * 60 * 1000); // 3 hours in milliseconds
+                
+                const result = await deepSyncAllNodes(threeHoursAgo, now);
+                
+                status.textContent = `Deep sync completed: ${result.synced}/${result.total} nodes`;
+                details.textContent = `Total locations: ${result.totalCount}. `;
+                
+                if (result.errors.length > 0) {
+                    details.textContent += `Errors: ${result.errors.length}`;
+                    console.error('Deep sync errors:', result.errors);
+                }
+                
+                // Refresh displays
+                if (typeof window.updateStatusBar === 'function') {
+                    await window.updateStatusBar();
+                }
+                const { refreshMapMarkers } = await import("{{ url_for('static', filename='maplibre-map.js') }}");
+                if (typeof refreshMapMarkers === 'function' && window.mapInstance && window.mapId) {
+                    await refreshMapMarkers(window.mapInstance, window.mapId);
+                }
+                
+            } catch (error) {
+                status.textContent = 'Deep sync failed';
+                details.textContent = error.message || String(error);
+                console.error('Deep sync error:', error);
+            } finally {
+                button.disabled = false;
+                button.textContent = 'Deep Sync (Last 3 Hours)';
+                
+                // Hide progress after 3 seconds
+                setTimeout(() => {
+                    progress.classList.add('hidden');
+                }, 3000);
+            }
+        };
+        
+        // Clear local state (IndexedDB)
+        window.clearLocalState = async function() {
+            const button = document.getElementById('clearDbButton');
+            const progress = document.getElementById('debugProgress');
+            const status = document.getElementById('debugStatus');
+            const details = document.getElementById('debugDetails');
+            
+            if (!confirm('Are you sure you want to clear all local state? This will delete all synced location data from IndexedDB.')) {
+                return;
+            }
+            
+            button.disabled = true;
+            button.textContent = 'Clearing...';
+            progress.classList.remove('hidden');
+            status.textContent = 'Clearing local state...';
+            details.textContent = '';
+            
+            try {
+                // Clear all tables in IndexedDB
+                await db.transaction('rw', db.locations, db.latest_locations, db.node_sync, db.map_mode, async () => {
+                    await db.locations.clear();
+                    await db.latest_locations.clear();
+                    await db.node_sync.clear();
+                    // Keep map_mode (don't clear map configurations)
+                    // await db.map_mode.clear();
+                });
+                
+                status.textContent = 'Local state cleared successfully';
+                details.textContent = 'All location data and sync states have been cleared from IndexedDB.';
+                
+                // Refresh displays
+                if (typeof window.updateStatusBar === 'function') {
+                    await window.updateStatusBar();
+                }
+                const { refreshMapMarkers } = await import("{{ url_for('static', filename='maplibre-map.js') }}");
+                if (typeof refreshMapMarkers === 'function' && window.mapInstance && window.mapId) {
+                    await refreshMapMarkers(window.mapInstance, window.mapId);
+                }
+                
+            } catch (error) {
+                status.textContent = 'Clear failed';
+                details.textContent = error.message || String(error);
+                console.error('Clear error:', error);
+            } finally {
+                button.disabled = false;
+                button.textContent = 'Clear Local State';
+                
+                // Hide progress after 3 seconds
+                setTimeout(() => {
+                    progress.classList.add('hidden');
+                }, 3000);
+            }
+        };
     })();
 </script>
 {% endblock %}
