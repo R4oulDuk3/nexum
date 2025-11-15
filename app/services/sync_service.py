@@ -10,6 +10,7 @@ import sqlite3
 from typing import List, Dict, Any, Optional
 from datetime import datetime, timezone
 from pathlib import Path
+from uuid import UUID
 import sys
 
 # Optional import for requests (only needed when real implementation is enabled)
@@ -163,94 +164,126 @@ class SyncService:
     def pull_data_from_peer(self, peer_ip: str, since_timestamp: int) -> str:
         """
         Pulls new data from a peer's /api/sync endpoint.
-        (MOCK: Returns a string for testing)
+        Calls the peer's API and prints the received data (does not save to DB yet).
         """
-        print(f"  MOCK PULL: Calling http://{peer_ip}/api/sync?since={since_timestamp}")
+        if requests is None:
+            return f"Error: 'requests' library not installed. Cannot pull data from {peer_ip}"
         
-        # --- REAL IMPLEMENTATION (for later) ---
-        # try:
-        #    response = requests.get(f"http://{peer_ip}/api/sync?since={since_timestamp}", timeout=5)
-        #    response.raise_for_status()
-        #    new_reports_data = response.json()  # This is a list of dicts
-        #    
-        #    # Convert dicts back to LocationReport dataclasses
-        #    new_reports = [LocationReport.from_dict(data) for data in new_reports_data]
-        #
-        #    # Save to our database
-        #    # location_service = get_location_service()
-        #    # for report in new_reports:
-        #    #     location_service.add_location(report)  # Use INSERT OR IGNORE
-        #
-        #    return f"Pulled {len(new_reports)} new reports."
-        # except requests.exceptions.RequestException as e:
-        #    print(f"  Pull failed: {e}")
-        #    return "Pull failed"
-        
-        # MOCK IMPLEMENTATION
-        return f"MOCK: Pulled 1 new report from {peer_ip}"
+        try:
+            url = f"http://{peer_ip}:5000/api/sync?since={since_timestamp}"
+            print(f"  Pulling data from peer {peer_ip}...")
+            print(f"  URL: {url}")
+            
+            response = requests.get(url, timeout=5)
+            response.raise_for_status()
+            
+            # Parse response
+            response_data = response.json()
+            
+            if response_data.get('status') != 'success':
+                error_msg = f"Peer returned error: {response_data.get('message', 'Unknown error')}"
+                print(f"  Error: {error_msg}")
+                return error_msg
+            
+            # Get the data array from the response
+            data_list = response_data.get('data', [])
+            count = response_data.get('count', 0)
+            
+            print(f"  Successfully pulled {count} location reports from {peer_ip}")
+            print(f"  Data received:")
+            for i, report in enumerate(data_list, 1):
+                print(f"    Report {i}:")
+                print(f"      ID: {report.get('id')}")
+                print(f"      Entity Type: {report.get('entity_type')}")
+                print(f"      Entity ID: {report.get('entity_id')}")
+                print(f"      Node ID: {report.get('node_id')}")
+                print(f"      Position: {report.get('position')}")
+                print(f"      Created At: {report.get('created_at')}")
+                print(f"      Metadata: {report.get('metadata')}")
+            
+            return f"Pulled {count} new reports from {peer_ip} (printed, not saved to DB)"
+            
+        except requests.exceptions.Timeout:
+            error_msg = f"Timeout connecting to {peer_ip}"
+            print(f"  Error: {error_msg}")
+            return error_msg
+        except requests.exceptions.ConnectionError as e:
+            error_msg = f"Connection error to {peer_ip}: {str(e)}"
+            print(f"  Error: {error_msg}")
+            return error_msg
+        except requests.exceptions.RequestException as e:
+            error_msg = f"Request failed: {str(e)}"
+            print(f"  Error: {error_msg}")
+            return error_msg
+        except json.JSONDecodeError as e:
+            error_msg = f"Failed to parse response from {peer_ip}: {str(e)}"
+            print(f"  Error: {error_msg}")
+            return error_msg
+        except Exception as e:
+            error_msg = f"Unexpected error pulling data from {peer_ip}: {str(e)}"
+            print(f"  Error: {error_msg}")
+            return error_msg
     
     def get_own_data_since(self, since_timestamp: int) -> List[Dict[str, Any]]:
         """
         Gets this node's own data that is newer than the timestamp.
-        (MOCK: Returns a dict for testing)
+        Queries the database for location_reports where node_id matches this node
+        and created_at is greater than since_timestamp.
         """
         my_node_id = self.get_my_node_id()
-        print(f"  MOCK SERVE: Peer asked for {my_node_id} data since {since_timestamp}")
         
-        # --- REAL IMPLEMENTATION (for later) ---
-        # conn = sqlite3.connect(self.db_path)
-        # conn.row_factory = sqlite3.Row
-        # cursor = conn.cursor()
-        #
-        # cursor.execute('''
-        #     SELECT * FROM location_reports
-        #     WHERE node_id = ? AND created_at > ?
-        #     ORDER BY created_at ASC
-        # ''', (my_node_id, since_timestamp))
-        #
-        # rows = cursor.fetchall()
-        # conn.close()
-        #
-        # # Convert DB rows to LocationReport dataclasses, then to dicts
-        # reports = []
-        # for row in rows:
-        #     metadata = {}
-        #     if row['metadata']:
-        #         try:
-        #             metadata = json.loads(row['metadata'])
-        #         except json.JSONDecodeError:
-        #             metadata = {}
-        #
-        #     report = LocationReport(
-        #         id=UUID(row['id']),
-        #         entity_type=EntityType(row['entity_type']),
-        #         entity_id=UUID(row['entity_id']),
-        #         node_id=row['node_id'],
-        #         position=GeoLocation(
-        #             latitude=row['latitude'],
-        #             longitude=row['longitude'],
-        #             altitude=row['altitude'],
-        #             accuracy=row['accuracy']
-        #         ),
-        #         created_at=row['created_at'],
-        #         metadata=metadata
-        #     )
-        #     reports.append(report.to_dict())
-        #
-        # return reports
-        
-        # MOCK IMPLEMENTATION
-        return [
-            {
-                "id": str(uuid.uuid4()),
-                "entity_type": "responder",
-                "entity_id": str(uuid.uuid4()),
-                "node_id": my_node_id,
-                "created_at": int(datetime.now(timezone.utc).timestamp() * 1000),
-                "position": {"lat": 52.37, "lon": 4.91, "alt": None, "accuracy": None},
-                "metadata": {"name": "Mock Responder Data"}
-            }
-        ]
+        try:
+            conn = sqlite3.connect(self.db_path)
+            conn.row_factory = sqlite3.Row
+            cursor = conn.cursor()
+            
+            # Query location_reports for this node_id with created_at > since_timestamp
+            cursor.execute('''
+                SELECT * FROM location_reports
+                WHERE node_id = ? AND created_at > ?
+                ORDER BY created_at ASC
+            ''', (my_node_id, since_timestamp))
+            
+            rows = cursor.fetchall()
+            conn.close()
+            
+            # Convert DB rows to LocationReport dataclasses, then to dicts
+            reports = []
+            for row in rows:
+                # Parse metadata JSON
+                metadata = {}
+                if row['metadata']:
+                    try:
+                        metadata = json.loads(row['metadata'])
+                    except json.JSONDecodeError:
+                        metadata = {}
+                
+                # Create LocationReport from database row
+                report = LocationReport(
+                    id=UUID(row['id']),
+                    entity_type=EntityType(row['entity_type']),
+                    entity_id=UUID(row['entity_id']),
+                    node_id=row['node_id'],
+                    position=GeoLocation(
+                        latitude=row['latitude'],
+                        longitude=row['longitude'],
+                        altitude=row['altitude'],
+                        accuracy=row['accuracy']
+                    ),
+                    created_at=row['created_at'],
+                    metadata=metadata
+                )
+                reports.append(report.to_dict())
+            
+            print(f"  Found {len(reports)} location reports for node {my_node_id} since {since_timestamp}")
+            return reports
+            
+        except sqlite3.Error as e:
+            print(f"SyncService: Database error getting own data: {e}")
+            return []
+        except Exception as e:
+            print(f"SyncService: Error getting own data: {e}")
+            return []
     
     def sync_with_all_peers(self) -> Dict[str, Any]:
         """
@@ -276,14 +309,67 @@ class SyncService:
                 pull_result = self.pull_data_from_peer(peer_ip, last_sync)
                 results["messages"].append(f"Peer {peer_mac} ({peer_ip}): {pull_result}")
                 
-                # Update sync time
-                self.update_last_sync_time(peer_mac, peer_ip)
-                results["peers_synced"] += 1
+                # Check if pull was successful (not an error message)
+                if pull_result.startswith("Pulled") or "new reports" in pull_result:
+                    # Update sync time only if pull was successful
+                    self.update_last_sync_time(peer_mac, peer_ip)
+                    results["peers_synced"] += 1
+                else:
+                    # Pull failed, add to errors
+                    results["errors"].append(f"Failed to pull from {peer_mac} ({peer_ip}): {pull_result}")
                 
             except Exception as e:
                 error_msg = f"Error syncing with {peer_mac} ({peer_ip}): {str(e)}"
                 results["errors"].append(error_msg)
                 print(f"SyncService: {error_msg}")
+        
+        return results
+    
+    def test_pull_all_peers(self, since_timestamp: int = 0) -> Dict[str, Any]:
+        """
+        Test function that pulls data from all peers with a given timestamp.
+        This is a simpler version for testing - it doesn't update sync logs.
+        
+        Args:
+            since_timestamp: Timestamp to use for all peers (default: 0)
+            
+        Returns:
+            Dictionary with results of the test pull operation
+        """
+        peers = self.get_all_peers()
+        results = {
+            "peers_found": len(peers),
+            "peers_attempted": 0,
+            "messages": [],
+            "errors": []
+        }
+        
+        print(f"Test: Pulling data from {len(peers)} peers with since={since_timestamp}")
+        
+        for peer_mac, peer_ip in peers.items():
+            try:
+                results["peers_attempted"] += 1
+                print(f"\nTest: Attempting to pull from peer {peer_mac} ({peer_ip})...")
+                
+                # Pull data from peer (will print to console)
+                pull_result = self.pull_data_from_peer(peer_ip, since_timestamp)
+                results["messages"].append(f"Peer {peer_mac} ({peer_ip}): {pull_result}")
+                
+                # Check if it was successful
+                if pull_result.startswith("Pulled") or "new reports" in pull_result:
+                    print(f"Test: ✓ Successfully pulled from {peer_mac}")
+                else:
+                    results["errors"].append(f"Peer {peer_mac} ({peer_ip}): {pull_result}")
+                    print(f"Test: ✗ Failed to pull from {peer_mac}")
+                    
+            except Exception as e:
+                error_msg = f"Error testing pull from {peer_mac} ({peer_ip}): {str(e)}"
+                results["errors"].append(error_msg)
+                print(f"Test: Exception - {error_msg}")
+        
+        print(f"\nTest: Completed. Attempted {results['peers_attempted']} peers, "
+              f"{len([m for m in results['messages'] if 'Pulled' in m])} successful, "
+              f"{len(results['errors'])} errors")
         
         return results
 

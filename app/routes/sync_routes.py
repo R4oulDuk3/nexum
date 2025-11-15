@@ -165,3 +165,81 @@ def trigger_sync():
             'status': 'error',
             'message': f'Server error: {str(e)}'
         }), 500
+
+
+@sync_bp.route('/test', methods=['GET'])
+@swag_from({
+    'tags': ['sync'],
+    'summary': 'Test: Pull data from all peers',
+    'description': 'Test endpoint that pulls data from all peers using since=0 (or specified timestamp). Does not update sync logs.',
+    'parameters': [
+        {
+            'name': 'since',
+            'in': 'query',
+            'required': False,
+            'schema': {
+                'type': 'integer',
+                'default': 0
+            },
+            'description': 'UTC milliseconds timestamp to use for all peers (default: 0)'
+        }
+    ],
+    'responses': {
+        200: {
+            'description': 'Test pull completed',
+            'content': {
+                'application/json': {
+                    'schema': {
+                        'type': 'object',
+                        'properties': {
+                            'status': {'type': 'string', 'example': 'success'},
+                            'peers_found': {'type': 'integer', 'example': 2},
+                            'peers_attempted': {'type': 'integer', 'example': 2},
+                            'messages': {
+                                'type': 'array',
+                                'items': {'type': 'string'}
+                            },
+                            'errors': {
+                                'type': 'array',
+                                'items': {'type': 'string'}
+                            }
+                        }
+                    }
+                }
+            }
+        },
+        500: {
+            'description': 'Server error',
+            'content': {
+                'application/json': {
+                    'schema': {
+                        'type': 'object',
+                        'properties': {
+                            'status': {'type': 'string', 'example': 'error'},
+                            'message': {'type': 'string'}
+                        }
+                    }
+                }
+            }
+        }
+    }
+})
+def test_pull_all_peers():
+    """Test endpoint to pull data from all peers with a specified timestamp"""
+    try:
+        # Get since parameter (default to 0)
+        since = request.args.get('since', type=int, default=0)
+        
+        # Call test function in sync service
+        results = sync_service.test_pull_all_peers(since_timestamp=since)
+        
+        return jsonify({
+            'status': 'success',
+            **results
+        })
+        
+    except Exception as e:
+        return jsonify({
+            'status': 'error',
+            'message': f'Server error: {str(e)}'
+        }), 500
