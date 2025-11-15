@@ -292,13 +292,30 @@ class SyncService:
         and created_at is greater than since_timestamp.
         """
         my_node_id = self.get_my_node_id()
+        print(f"SyncService: get_own_data_since() - My node ID: {my_node_id}, since: {since_timestamp}")
         
         try:
             conn = sqlite3.connect(self.db_path)
             conn.row_factory = sqlite3.Row
             cursor = conn.cursor()
             
+            # First, let's check what node_ids exist in the database
+            cursor.execute('SELECT DISTINCT node_id FROM location_reports')
+            all_node_ids = [row[0] for row in cursor.fetchall()]
+            print(f"SyncService: All node_ids in database: {all_node_ids}")
+            
+            # Check total count of reports
+            cursor.execute('SELECT COUNT(*) FROM location_reports')
+            total_count = cursor.fetchone()[0]
+            print(f"SyncService: Total location reports in database: {total_count}")
+            
+            # Check count for our node_id
+            cursor.execute('SELECT COUNT(*) FROM location_reports WHERE node_id = ?', (my_node_id,))
+            my_count = cursor.fetchone()[0]
+            print(f"SyncService: Location reports for my node_id ({my_node_id}): {my_count}")
+            
             # Query location_reports for this node_id with created_at > since_timestamp
+            print(f"SyncService: Executing query: node_id='{my_node_id}', created_at > {since_timestamp}")
             cursor.execute('''
                 SELECT * FROM location_reports
                 WHERE node_id = ? AND created_at > ?
@@ -306,6 +323,28 @@ class SyncService:
             ''', (my_node_id, since_timestamp))
             
             rows = cursor.fetchall()
+            print(f"SyncService: Query returned {len(rows)} rows")
+            
+            # If no rows, let's check if it's a case sensitivity or format issue
+            if len(rows) == 0 and my_count > 0:
+                print(f"SyncService: WARNING: Found {my_count} reports for node_id but query returned 0!")
+                print(f"SyncService: Checking if node_id format matches...")
+                # Try case-insensitive match
+                cursor.execute('''
+                    SELECT node_id, COUNT(*) as cnt 
+                    FROM location_reports 
+                    GROUP BY node_id
+                ''')
+                node_id_counts = cursor.fetchall()
+                print(f"SyncService: Node ID breakdown:")
+                for row in node_id_counts:
+                    node_id_val = row[0]
+                    count = row[1]
+                    match = "✓" if node_id_val == my_node_id else "✗"
+                    print(f"SyncService:   {match} '{node_id_val}' (count: {count})")
+                    if node_id_val.lower() == my_node_id.lower() and node_id_val != my_node_id:
+                        print(f"SyncService:   ⚠ Case mismatch detected!")
+            
             conn.close()
             
             # Convert DB rows to LocationReport dataclasses, then to dicts
@@ -336,14 +375,18 @@ class SyncService:
                 )
                 reports.append(report.to_dict())
             
-            print(f"  Found {len(reports)} location reports for node {my_node_id} since {since_timestamp}")
+            print(f"SyncService: Returning {len(reports)} location reports for node {my_node_id} since {since_timestamp}")
             return reports
             
         except sqlite3.Error as e:
-            print(f"SyncService: Database error getting own data: {e}")
+            print(f"SyncService: Database error getting own data: {type(e).__name__}: {e}")
+            import traceback
+            traceback.print_exc()
             return []
         except Exception as e:
-            print(f"SyncService: Error getting own data: {e}")
+            print(f"SyncService: Error getting own data: {type(e).__name__}: {e}")
+            import traceback
+            traceback.print_exc()
             return []
     
     def sync_with_all_peers(self) -> Dict[str, Any]:
