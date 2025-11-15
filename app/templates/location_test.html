@@ -3,7 +3,11 @@
 {% block title %}Location Service Test - Nexum{% endblock %}
 
 {% block extra_css %}
-    <link rel="stylesheet" href="/static/assets/leaflet.css">
+#location-map {
+    width: 100%;
+    height: 400px;
+    border: 2px solid #ccc;
+}
 {% endblock %}
 
 {% block content %}
@@ -187,12 +191,10 @@
                         </div>
                     </div>
 
-                    <!-- Map Placeholder -->
+                    <!-- Map View -->
                     <div class="bg-white shadow rounded-lg p-6">
                         <h3 class="text-lg font-medium text-gray-900 mb-4">Map View</h3>
-                        <div class="bg-gray-100 rounded-lg h-64 flex items-center justify-center" id="map">
-                            <!-- <p class="text-gray-500">Map integration coming soon...</p> -->
-                        </div>
+                        <div id="location-map"></div>
                     </div>
                 </div>
             </div>
@@ -556,101 +558,30 @@
             }
         });
    
-        // MAP LOGIC
-
-          // Initialize map (initial dummy position)
-        let map = L.map("map").setView([52.454255,13.38382], 16);
-
-        // --- TILE SOURCES ---
-        // 1️⃣ Online Tile Layer (Active)
-        const onlineTiles = L.tileLayer(
-            "https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png",
-            {
-                maxZoom: 18,
-                attribution: "© OpenStreetMap contributors"
-            }
-        ).addTo(map);
-
-        // 2️⃣ Offline MBTiles Layer (requires plugin + local mbtiles file)
-        // const offlineTiles = L.tileLayer.mbTiles("maps/offline.mbtiles", {
-        //     maxZoom: 19
-        // });
-        // offlineTiles.addTo(map);
-
-
-        // --- HYBRID LOCATION FUNCTION ---
-        function centerMap(lat, lon, label = "Location found") {
-            map.setView([lat, lon], 15);
-            L.marker([lat, lon]).addTo(map)
-                .bindPopup(label).openPopup();
-        }
-
-        // Try GPS first
-        function tryGPS() {
-            return new Promise((resolve, reject) => {
-                if (!("geolocation" in navigator)) {
-                    return reject("Geolocation not supported");
-                }
-
-                navigator.geolocation.getCurrentPosition(
-                    (pos) => {
-                        resolve({
-                            lat: pos.coords.latitude,
-                            lon: pos.coords.longitude,
-                            label: "GPS Location"
-                        });
-                    },
-                    (err) => reject(err),
-                    {
-                        enableHighAccuracy: true,
-                        timeout: 7000,
-                        maximumAge: 0
-                    }
-                );
-            });
-        }
-
-        // Fallback: IP-based location
-        function tryIP() {
-
-            return {
-                    lat: 52.454255,
-                    lon: 13.38382,
-                    label: "Cheat-Based Location"
-                }   
-            
-
-
-            return fetch("https://ipapi.co/json/")
-                .then(res => res.json())
-                .then(loc => ({
-                    lat: loc.latitude,
-                    lon: loc.longitude,
-                    label: "IP-Based Location"
-                }));
-        }
-
-        // --- LOCATION HANDLING ---
-        async function initLocation() {
+        // MapLibre GL JS library - loaded before initialization
+        </script>
+        <script src="{{ url_for('static', filename='maplibre-gl.js') }}"></script>
+        <script>
+        // Map initialization - using TileJSON center
+        (async function() {
             try {
-                const gps = await tryGPS();
-                centerMap(gps.lat, gps.lon, gps.label);
-            } catch (gpsError) {
-                console.warn("GPS failed:", gpsError.message || gpsError);
-                console.warn("Trying IP-based location...");
-
-                try {
-                    const ip = await tryIP();
-                    centerMap(ip.lat, ip.lon, ip.label);
-                } catch (ipError) {
-                    console.error("IP-based location also failed:", ipError);
-                    alert("Unable to determine location.");
-                }
+                const { initMap, addUserMarker, getTileJsonCenter } = await import("{{ url_for('static', filename='maplibre-map.js') }}");
+                
+                // Initialize map - center and zoom will be automatically fetched from TileJSON
+                window.mapInstance_location_map = await initMap({
+                    containerId: 'location-map',
+                    showControls: true
+                });
+                
+                // Get TileJSON center for marker placement
+                const tileJsonCenter = await getTileJsonCenter();
+                
+                // Add marker at TileJSON center
+                addUserMarker(window.mapInstance_location_map, tileJsonCenter.center[0], tileJsonCenter.center[1]);
+            } catch (error) {
+                console.error('Error initializing map:', error);
             }
-        }
-
-        // Start hybrid location
-        initLocation();
+        })();
     </script>
 {% endblock %}
 

@@ -19,6 +19,28 @@ app = Flask(__name__, static_folder='assets', static_url_path='/assets')
 app.config['SECRET_KEY'] = os.environ.get('SECRET_KEY', 'dev-secret-key-change-in-production')
 app.config['DATABASE'] = os.path.join(os.path.dirname(__file__), 'data', 'messaging.db')
 
+# Development mode: disable caching for JS/CSS files
+@app.after_request
+def add_no_cache_headers(response):
+    """Add no-cache headers for static assets in development mode"""
+    # Check if running in debug/development mode
+    is_debug = (
+        app.debug or 
+        os.environ.get('FLASK_ENV') == 'development' or 
+        os.environ.get('FLASK_DEBUG') == '1' or
+        os.environ.get('FLASK_DEBUG') == 'True'
+    )
+    
+    if is_debug:
+        # Check if this is a static file request (JS, CSS, or other assets)
+        if request.path.startswith('/assets/'):
+            # Disable caching for JS, CSS, and other development files
+            if any(request.path.endswith(ext) for ext in ['.js', '.css', '.html', '.map']):
+                response.headers['Cache-Control'] = 'no-cache, no-store, must-revalidate'
+                response.headers['Pragma'] = 'no-cache'
+                response.headers['Expires'] = '0'
+    return response
+
 # Initialize Marshmallow
 ma = Marshmallow(app)
 
@@ -52,6 +74,10 @@ app.config['SWAGGER'] = {
         {
             'name': 'sync',
             'description': 'Mesh node synchronization endpoints'
+        },
+        {
+            'name': 'tiles',
+            'description': 'MBTiles map tile serving'
         }
     ]
 }
@@ -61,6 +87,14 @@ from routes.location_routes import location_bp, _apispec
 from routes.sync_routes import sync_bp
 app.register_blueprint(location_bp)
 app.register_blueprint(sync_bp)
+
+# Register Raster Tiles blueprint (PNG/JPEG)
+from routes.raster_tiles_routes import raster_tiles_bp
+app.register_blueprint(raster_tiles_bp)
+
+# Register Vector Tiles blueprint (PBF/MVT)
+from routes.vector_tiles_routes import vector_tiles_bp
+app.register_blueprint(vector_tiles_bp)
 
 # Get schema components from APISpec
 # This registers all Marshmallow schemas with Swagger automatically
@@ -163,6 +197,16 @@ def settings():
 def test_location():
     """Location service test page"""
     return render_template('location_test.html')
+
+@app.route('/test/map')
+def test_map():
+    """MapLibre GL JS test page"""
+    return render_template('map_test.html')
+
+@app.route('/test/map-marker')
+def test_map_marker():
+    """Map marker test page - minimal test for marker positioning"""
+    return render_template('map_marker_test.html')
 
 
 @app.route('/api/health')
