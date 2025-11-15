@@ -246,16 +246,6 @@ class SyncService:
         """
         try:
             now_ms = int(datetime.now(timezone.utc).timestamp() * 1000)
-            now_readable = datetime.fromtimestamp(now_ms / 1000, tz=timezone.utc).isoformat()
-            
-            print(f"\n{'='*60}")
-            print(f"SyncService: update_last_sync_time() - ENTRY")
-            print(f"{'='*60}")
-            print(f"  peer_node_id: '{peer_node_id}'")
-            print(f"  peer_ip: '{peer_ip}'")
-            print(f"  new_timestamp: {now_ms}")
-            print(f"  new_timestamp_readable: {now_readable}")
-            print(f"  db_path: {self.db_path}")
             
             conn = sqlite3.connect(self.db_path)
             cursor = conn.cursor()
@@ -265,99 +255,22 @@ class SyncService:
             existing = cursor.fetchone()
             
             if existing:
-                old_timestamp = existing[2] if existing[2] else 0
-                old_ip = existing[1] if existing[1] else 'unknown'
-                old_readable = datetime.fromtimestamp(old_timestamp / 1000, tz=timezone.utc).isoformat() if old_timestamp > 0 else 'never'
-                
-                print(f"  Found existing entry:")
-                print(f"    old_timestamp: {old_timestamp}")
-                print(f"    old_timestamp_readable: {old_readable}")
-                print(f"    old_ip: {old_ip}")
-                
                 # Update the entry
                 cursor.execute('''
                     UPDATE sync_log 
                     SET last_sync_at = ?, last_known_ip = ?
                     WHERE peer_node_id = ?
                 ''', (now_ms, peer_ip, peer_node_id))
-                
-                print(f"  Executing UPDATE...")
-                print(f"    UPDATE sync_log SET last_sync_at={now_ms}, last_known_ip='{peer_ip}' WHERE peer_node_id='{peer_node_id}'")
             else:
-                print(f"  No existing entry found, creating new entry")
-                
                 # Insert new entry
                 cursor.execute('''
                     INSERT INTO sync_log (peer_node_id, last_known_ip, last_sync_at)
                     VALUES (?, ?, ?)
                 ''', (peer_node_id, peer_ip, now_ms))
-                
-                print(f"  Executing INSERT...")
-                print(f"    INSERT INTO sync_log (peer_node_id, last_known_ip, last_sync_at)")
-                print(f"    VALUES ('{peer_node_id}', '{peer_ip}', {now_ms})")
             
             # Commit the transaction
-            print(f"  Committing transaction...")
             conn.commit()
-            print(f"  ✓ Transaction committed")
-            
-            # Close and reopen connection to ensure we see committed data
             conn.close()
-            print(f"  Closed connection, reopening to verify...")
-            
-            # Reopen connection to verify committed data
-            conn = sqlite3.connect(self.db_path)
-            cursor = conn.cursor()
-            
-            # Verify the update/insert by querying the table
-            print(f"  Querying sync_log table to verify update...")
-            cursor.execute('SELECT peer_node_id, last_known_ip, last_sync_at FROM sync_log WHERE peer_node_id = ?', (peer_node_id,))
-            verify_row = cursor.fetchone()
-            
-            if verify_row:
-                verify_timestamp = verify_row[2] if verify_row[2] else 0
-                verify_ip = verify_row[1] if verify_row[1] else 'unknown'
-                verify_readable = datetime.fromtimestamp(verify_timestamp / 1000, tz=timezone.utc).isoformat() if verify_timestamp > 0 else 'never'
-                
-                print(f"  ✓ VERIFICATION - Entry found in sync_log table:")
-                print(f"    peer_node_id: '{verify_row[0]}'")
-                print(f"    last_known_ip: '{verify_ip}'")
-                print(f"    last_sync_at: {verify_timestamp}")
-                print(f"    last_sync_at_readable: {verify_readable}")
-                
-                if verify_timestamp == now_ms and verify_ip == peer_ip:
-                    print(f"  ✓✓✓ VERIFICATION PASSED - Data matches expected values!")
-                    print(f"      Timestamp updated from old value to {now_ms}")
-                elif verify_timestamp == 0:
-                    print(f"  ✗✗✗ VERIFICATION FAILED - Timestamp is still 0!")
-                    print(f"      Expected timestamp: {now_ms}")
-                    print(f"      Got timestamp: {verify_timestamp}")
-                    print(f"      This means the UPDATE/INSERT did not update the timestamp properly")
-                else:
-                    print(f"  ✗ VERIFICATION FAILED - Data mismatch!")
-                    print(f"    Expected timestamp: {now_ms}, Got: {verify_timestamp}")
-                    print(f"    Expected IP: {peer_ip}, Got: {verify_ip}")
-            else:
-                print(f"  ✗✗✗ VERIFICATION FAILED - Entry not found in table after insert/update!")
-                print(f"      Query: SELECT * FROM sync_log WHERE peer_node_id = '{peer_node_id}'")
-                print(f"      This means the INSERT/UPDATE failed or entry was deleted")
-            
-            # Also show all entries in sync_log for debugging
-            cursor.execute('SELECT COUNT(*) FROM sync_log')
-            total_count = cursor.fetchone()[0]
-            print(f"  Total entries in sync_log table: {total_count}")
-            
-            if total_count > 0:
-                cursor.execute('SELECT peer_node_id, last_known_ip, last_sync_at FROM sync_log ORDER BY last_sync_at DESC')
-                all_rows = cursor.fetchall()
-                print(f"  All entries in sync_log:")
-                for idx, row in enumerate(all_rows, 1):
-                    row_timestamp = row[2] if row[2] else 0
-                    row_readable = datetime.fromtimestamp(row_timestamp / 1000, tz=timezone.utc).isoformat() if row_timestamp > 0 else 'never'
-                    print(f"    {idx}. peer_node_id='{row[0]}', IP='{row[1]}', last_sync_at={row_timestamp} ({row_readable})")
-            
-            conn.close()
-            print(f"{'='*60}\n")
             
         except Exception as e:
             print(f"\n{'='*60}")
@@ -475,8 +388,6 @@ class SyncService:
         
         try:
             url = f"http://{peer_ip}:5000/api/sync?since={since_timestamp}"
-            print(f"  Pulling data from peer {peer_ip}...")
-            print(f"  URL: {url}")
             
             response = requests.get(url, timeout=5)
             response.raise_for_status()
@@ -486,7 +397,6 @@ class SyncService:
             
             if response_data.get('status') != 'success':
                 error_msg = f"Peer returned error: {response_data.get('message', 'Unknown error')}"
-                print(f"  Error: {error_msg}")
                 return (error_msg, [])
             
             # Get the data array from the response
@@ -494,8 +404,6 @@ class SyncService:
             count = response_data.get('count', 0)
             
             status_msg = f"Pulled {count} new reports from {peer_ip}"
-            print(f"  ✓ Successfully pulled {count} location reports from {peer_ip}")
-            print(f"  Return value: status_msg='{status_msg}', data_list length={len(data_list)}")
             
             return (status_msg, data_list)
             
@@ -1041,10 +949,7 @@ class SyncService:
         
         # Initialize sync_log entries for all peers if using sync_log
         if use_sync_log:
-            print(f"\n{'='*60}")
-            print(f"Test: Pulling data from {len(peers)} peers using sync_log timestamps")
-            print(f"Test: Initializing sync_log entries for peers if needed...")
-            print(f"{'='*60}")
+            print(f"📋 Initializing sync_log for {len(peers)} peers...")
             
             try:
                 print(f"  Opening database connection to: {self.db_path}")
@@ -1066,48 +971,28 @@ class SyncService:
                     print(f"  Current sync_log entries: {count_before}")
                     
                     for peer_mac, peer_ip in peers.items():
-                        print(f"\n  Processing peer: {peer_mac} ({peer_ip})")
-                        
                         # Check if entry exists
                         cursor.execute('SELECT peer_node_id, last_known_ip, last_sync_at FROM sync_log WHERE peer_node_id = ?', (peer_mac,))
                         existing = cursor.fetchone()
                         
                         if not existing:
                             # Insert new entry with timestamp 0
-                            print(f"    ✗ Entry NOT found in sync_log")
-                            print(f"    → INSERTING new entry...")
                             cursor.execute('''
                                 INSERT INTO sync_log (peer_node_id, last_known_ip, last_sync_at)
                                 VALUES (?, ?, ?)
                             ''', (peer_mac, peer_ip, 0))
-                            print(f"    ✓ EXECUTED INSERT: peer_node_id='{peer_mac}', last_known_ip='{peer_ip}', last_sync_at=0")
-                        else:
-                            print(f"    ✓ Entry EXISTS: peer_node_id='{existing[0]}', IP='{existing[1]}', last_sync_at={existing[2]}")
                     
                     # Commit the transaction
-                    print(f"\n  Committing transaction...")
                     conn.commit()
-                    print(f"  ✓ Transaction committed")
                     
                     # Verify after commit
                     cursor.execute('SELECT COUNT(*) FROM sync_log')
                     count_after = cursor.fetchone()[0]
-                    print(f"  sync_log entries after initialization: {count_after}")
                     
                     if count_after > count_before:
-                        print(f"  ✓ SUCCESS: Added {count_after - count_before} new entries")
-                    else:
-                        print(f"  ⚠ No new entries added (all peers already existed)")
-                    
-                    # Show all entries
-                    cursor.execute('SELECT peer_node_id, last_known_ip, last_sync_at FROM sync_log ORDER BY peer_node_id')
-                    all_rows = cursor.fetchall()
-                    print(f"  All sync_log entries:")
-                    for row in all_rows:
-                        print(f"    - {row[0]} ({row[1]}): last_sync_at={row[2]}")
+                        print(f"   ✓ Added {count_after - count_before} new sync_log entries")
                 
                 conn.close()
-                print(f"{'='*60}\n")
             except Exception as e:
                 print(f"  ✗ ERROR initializing sync_log entries: {e}")
                 import traceback
@@ -1125,61 +1010,25 @@ class SyncService:
                 # Determine which timestamp to use
                 if use_sync_log and since_timestamp is None:
                     # Use sync_log timestamp for this peer
-                    print(f"\nTest: Determining timestamp for peer {peer_mac} ({peer_ip})...")
                     peer_since = self.get_last_sync_time(peer_mac)
-                    print(f"  get_last_sync_time() returned: {peer_since}")
-                    
-                    if peer_since > 0:
-                        age_seconds = (int(datetime.now(timezone.utc).timestamp() * 1000) - peer_since) / 1000
-                        print(f"\nTest: Attempting to pull from peer {peer_mac} ({peer_ip})...")
-                        print(f"  ✓ Using sync_log timestamp: {peer_since} ({age_seconds:.1f}s ago)")
-                    else:
-                        peer_since = 0
-                        print(f"\nTest: Attempting to pull from peer {peer_mac} ({peer_ip})...")
-                        print(f"  ✗ sync_log returned timestamp=0, using since=0 (full sync)")
-                        print(f"  Note: This could mean either no entry exists or entry has timestamp=0")
+                    if peer_since == 0:
+                        peer_since = 0  # Full sync if no timestamp
                 elif since_timestamp is not None:
                     # Use provided timestamp for all peers
                     peer_since = since_timestamp
-                    print(f"\nTest: Attempting to pull from peer {peer_mac} ({peer_ip})...")
-                    print(f"  Using provided timestamp: {peer_since}")
                 else:
                     # Default to 0
                     peer_since = 0
-                    print(f"\nTest: Attempting to pull from peer {peer_mac} ({peer_ip})...")
-                    print(f"  Using since=0 (full sync)")
                 
                 # Pull data from peer using the determined timestamp
                 status_msg, data_list = self.pull_data_from_peer(peer_ip, peer_since)
                 
                 # Check if it was successful
-                print(f"\nTest: Checking if pull was successful...")
-                print(f"  data_list: {data_list} (type: {type(data_list)}, length: {len(data_list) if data_list else 0})")
-                print(f"  status_msg: '{status_msg}'")
-                print(f"  status_msg.startswith('Pulled'): {status_msg.startswith('Pulled') if status_msg else False}")
-                
                 is_successful = data_list or (status_msg and status_msg.startswith("Pulled"))
-                print(f"  Pull successful? {is_successful}")
                 
                 if is_successful:
                     # Save the location reports to database
                     if data_list:
-                        # Print pulled data for testing
-                        print(f"\nTest: Data pulled from {peer_mac} ({peer_ip}):")
-                        print(f"  Number of reports: {len(data_list)}")
-                        for i, report in enumerate(data_list, 1):
-                            print(f"  Report {i}:")
-                            print(f"    ID: {report.get('id')}")
-                            print(f"    Entity Type: {report.get('entity_type')}")
-                            print(f"    Entity ID: {report.get('entity_id')}")
-                            print(f"    Node ID: {report.get('node_id')}")
-                            print(f"    Position: lat={report.get('position', {}).get('lat')}, lon={report.get('position', {}).get('lon')}")
-                            print(f"    Created At: {report.get('created_at')}")
-                            if report.get('metadata'):
-                                print(f"    Metadata: {report.get('metadata')}")
-                        print()  # Empty line for readability
-                        
-                        print(f"Test: Saving {len(data_list)} reports to database...")
                         saved_count, skipped_count = self.save_location_reports(data_list)
                         results["total_reports_pulled"] += len(data_list)
                         results["total_reports_saved"] += saved_count
@@ -1187,42 +1036,13 @@ class SyncService:
                         
                         msg = f"Peer {peer_mac} ({peer_ip}): {status_msg} - Saved {saved_count}, Skipped {skipped_count}"
                         results["messages"].append(msg)
-                        print(f"Test: ✓ Successfully pulled and saved data from {peer_mac}")
-                        print(f"      {msg}")
+                        print(f"   ✓ {peer_mac}: {len(data_list)} reports pulled, {saved_count} saved, {skipped_count} skipped")
                     else:
                         results["messages"].append(f"Peer {peer_mac} ({peer_ip}): {status_msg}")
-                        print(f"Test: ✓ Successfully pulled from {peer_mac} (no new data)")
+                        print(f"   ✓ {peer_mac}: No new data")
                     
                     # Update sync_log since pull was successful (even if no new data)
-                    print(f"\nTest: ============================================================")
-                    print(f"Test: Updating sync_log for {peer_mac} ({peer_ip})...")
-                    print(f"Test: ============================================================")
-                    
-                    # Get current timestamp BEFORE update to compare
-                    before_update = self.get_last_sync_time(peer_mac)
-                    print(f"Test: Current timestamp BEFORE update: {before_update}")
-                    
-                    # Call update function
-                    print(f"Test: Calling update_last_sync_time('{peer_mac}', '{peer_ip}')...")
                     self.update_last_sync_time(peer_mac, peer_ip)
-                    print(f"Test: Returned from update_last_sync_time()")
-                    
-                    # Verify sync_log update by querying IMMEDIATELY after update
-                    print(f"\nTest: Verifying sync_log update...")
-                    new_sync_time = self.get_last_sync_time(peer_mac)
-                    print(f"Test: Timestamp AFTER update: {new_sync_time}")
-                    print(f"Test: Timestamp BEFORE update: {before_update}")
-                    
-                    if new_sync_time > 0 and new_sync_time != before_update:
-                        new_readable = datetime.fromtimestamp(new_sync_time / 1000, tz=timezone.utc).isoformat()
-                        print(f"Test: ✓✓✓ SUCCESS: Sync_log updated from {before_update} to {new_sync_time}")
-                        print(f"Test:     Readable: {new_readable}")
-                    elif new_sync_time == before_update:
-                        print(f"Test: ✗ ERROR: Timestamp did NOT change! Still {new_sync_time}")
-                        print(f"Test:     This means update_last_sync_time() did not update the timestamp")
-                    else:
-                        print(f"Test: ✗ WARNING: Sync_log update may have failed (timestamp is 0)")
-                    print(f"Test: ============================================================\n")
                 else:
                     error_msg = f"Peer {peer_mac} ({peer_ip}): {status_msg}"
                     results["errors"].append(error_msg)
@@ -1235,11 +1055,10 @@ class SyncService:
                 results["messages"].append(error_msg)
                 print(f"Test: Exception - {error_msg}")
         
-        print(f"\nTest: Completed. Attempted {results['peers_attempted']} peers, "
-              f"Pulled {results['total_reports_pulled']} reports, "
-              f"Saved {results['total_reports_saved']}, "
-              f"Skipped {results['total_reports_skipped']}, "
-              f"{len(results['errors'])} errors")
+        print(f"📦 Sync Summary: {results['peers_attempted']} peers, "
+              f"{results['total_reports_pulled']} pulled, "
+              f"{results['total_reports_saved']} saved, "
+              f"{results['total_reports_skipped']} skipped")
         
         return results
     

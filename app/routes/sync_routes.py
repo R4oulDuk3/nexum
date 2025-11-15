@@ -488,6 +488,12 @@ def test_pull_all_peers():
     Can optionally override with since parameter.
     """
     try:
+        # Check if this is an auto-sync call (from scheduler)
+        is_auto_sync = request.args.get('use_sync_log', '').lower() == 'true' and request.args.get('since') is None
+        
+        if is_auto_sync:
+            print(f"📡 AUTO SYNC TRIGGERED via /api/sync/test")
+        
         # Get since parameter (None if not provided, so we use sync_log)
         since_param = request.args.get('since', type=int)
         
@@ -499,6 +505,12 @@ def test_pull_all_peers():
             since_timestamp=since_param,
             use_sync_log=use_sync_log_param
         )
+        
+        if is_auto_sync:
+            peers_found = results.get('peers_found', 0)
+            reports_pulled = results.get('total_reports_pulled', 0)
+            reports_saved = results.get('total_reports_saved', 0)
+            print(f"📊 Auto Sync Results: {peers_found} peers, {reports_pulled} reports pulled, {reports_saved} saved")
         
         return jsonify({
             'status': 'success',

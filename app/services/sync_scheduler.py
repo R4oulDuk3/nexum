@@ -75,14 +75,12 @@ class SyncScheduler:
         while not self._stop_event.is_set():
             try:
                 print(f"\n{'='*60}")
-                print(f"SyncScheduler: Triggering automatic sync ({self._sync_count + 1})")
-                print(f"SyncScheduler: Time: {datetime.now().isoformat()}")
+                print(f"🔄 AUTO SYNC CALLED (#{self._sync_count + 1})")
                 print(f"{'='*60}")
                 
                 # Call the /api/sync/test endpoint via HTTP
                 # This uses sync_log for incremental sync (use_sync_log=True by default)
                 sync_url = f"{self.api_url}/api/sync/test"
-                print(f"SyncScheduler: Calling {sync_url}...")
                 
                 try:
                     response = requests.get(
@@ -98,33 +96,30 @@ class SyncScheduler:
                     
                     if results.get('status') != 'success':
                         error_msg = results.get('message', 'Unknown error')
-                        print(f"SyncScheduler: Sync failed: {error_msg}")
-                        print(f"SyncScheduler: Response: {results}")
+                        print(f"❌ AUTO SYNC FAILED: {error_msg}")
                     else:
                         self._last_sync_time = datetime.now()
                         self._sync_count += 1
                         
-                        print(f"\nSyncScheduler: Sync completed successfully")
-                        print(f"  Errors: {len(results.get('errors', []))}")
+                        # Summary of results
+                        peers_found = results.get('peers_found', 0)
+                        peers_attempted = results.get('peers_attempted', 0)
+                        reports_pulled = results.get('total_reports_pulled', 0)
+                        reports_saved = results.get('total_reports_saved', 0)
+                        reports_skipped = results.get('total_reports_skipped', 0)
+                        errors_count = len(results.get('errors', []))
                         
-                        if results.get('errors'):
-                            print(f"SyncScheduler: Errors encountered:")
-                            for error in results.get('errors', []):
-                                print(f"  - {error}")
-                            
-                        if results.get('messages'):
-                            print(f"SyncScheduler: Messages:")
-                            for msg in results.get('messages', []):
-                                print(f"  - {msg}")
+                        print(f"\n✅ AUTO SYNC FINISHED")
+                        print(f"   Peers found: {peers_found} | Attempted: {peers_attempted}")
+                        print(f"   Reports: {reports_pulled} pulled, {reports_saved} saved, {reports_skipped} skipped")
+                        if errors_count > 0:
+                            print(f"   ⚠️  Errors: {errors_count}")
                         
                 except requests.exceptions.RequestException as e:
-                    print(f"SyncScheduler: ERROR calling sync endpoint: {type(e).__name__}: {e}")
-                    print(f"SyncScheduler: URL was: {sync_url}")
-                    if hasattr(e, 'response') and e.response is not None:
-                        print(f"SyncScheduler: Response status: {e.response.status_code}")
-                        print(f"SyncScheduler: Response body: {e.response.text[:200]}")
+                    print(f"❌ AUTO SYNC ERROR: {type(e).__name__}: {e}")
                         
-                print(f"{'='*60}\n")
+                print(f"{'='*60}")
+                print(f"### END AUTO SYNC ###\n")
                 
             except Exception as e:
                 print(f"SyncScheduler: ERROR in sync loop: {type(e).__name__}: {e}")
