@@ -15,3 +15,4 @@ https://unpkg.com/leaflet@1.9.4/dist/leaflet.js|leaflet.js
 https://unpkg.com/maplibre-gl@4.1.1/dist/maplibre-gl.js|maplibre-gl.js
 https://unpkg.com/maplibre-gl@4.1.1/dist/maplibre-gl.css|maplibre-gl.css
 https://cdn.jsdelivr.net/npm/franken-ui@2.1.1/dist/css/utilities.min.css|franken-ui.css
+https://unpkg.com/dexie@latest/dist/dexie.js|dexie.js

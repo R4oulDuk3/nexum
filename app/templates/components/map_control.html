@@ -1,0 +1,132 @@
+{% set map_id = map_id or 'default' %}
+<div id="map-control-{{ map_id }}" class="map-control" style="
+    position: absolute;
+    top: 10px;
+    right: 10px;
+    background: white;
+    border-radius: 8px;
+    box-shadow: 0 2px 8px rgba(0, 0, 0, 0.15);
+    padding: 16px;
+    z-index: 1000;
+    min-width: 220px;
+    max-height: 85vh;
+    overflow-y: auto;
+    font-family: system-ui, -apple-system, sans-serif;
+">
+    <!-- Header -->
+    <div style="
+        font-weight: 600;
+        font-size: 16px;
+        color: #111827;
+        margin-bottom: 16px;
+        padding-bottom: 12px;
+        border-bottom: 2px solid #e5e7eb;
+    ">
+        Map Controls
+    </div>
+
+    <!-- Entity Types Section -->
+    <div style="margin-bottom: 16px;">
+        <div style="
+            font-size: 13px;
+            font-weight: 600;
+            color: #374151;
+            margin-bottom: 12px;
+        ">
+            Show Entity Types
+        </div>
+        
+        <div style="
+            display: flex;
+            flex-direction: column;
+            gap: 10px;
+        ">
+            <label style="display: flex; align-items: center; gap: 10px; cursor: pointer; font-size: 14px; color: #374151; padding: 6px 0; user-select: none;">
+                <input type="checkbox" class="entity-type-checkbox" value="responder" style="width: 18px; height: 18px; cursor: pointer; accent-color: #3b82f6;">
+                <span>Responders</span>
+            </label>
+            <label style="display: flex; align-items: center; gap: 10px; cursor: pointer; font-size: 14px; color: #374151; padding: 6px 0; user-select: none;">
+                <input type="checkbox" class="entity-type-checkbox" value="civilian" style="width: 18px; height: 18px; cursor: pointer; accent-color: #3b82f6;">
+                <span>Civilians</span>
+            </label>
+            <label style="display: flex; align-items: center; gap: 10px; cursor: pointer; font-size: 14px; color: #374151; padding: 6px 0; user-select: none;">
+                <input type="checkbox" class="entity-type-checkbox" value="incident" style="width: 18px; height: 18px; cursor: pointer; accent-color: #3b82f6;">
+                <span>Incidents</span>
+            </label>
+            <label style="display: flex; align-items: center; gap: 10px; cursor: pointer; font-size: 14px; color: #374151; padding: 6px 0; user-select: none;">
+                <input type="checkbox" class="entity-type-checkbox" value="resource" style="width: 18px; height: 18px; cursor: pointer; accent-color: #3b82f6;">
+                <span>Resources</span>
+            </label>
+            <label style="display: flex; align-items: center; gap: 10px; cursor: pointer; font-size: 14px; color: #374151; padding: 6px 0; user-select: none;">
+                <input type="checkbox" class="entity-type-checkbox" value="hazard" style="width: 18px; height: 18px; cursor: pointer; accent-color: #3b82f6;">
+                <span>Hazards</span>
+            </label>
+        </div>
+    </div>
+
+    <!-- Buttons Section -->
+    <div style="
+        display: flex;
+        flex-direction: column;
+        gap: 8px;
+        margin-top: 16px;
+        padding-top: 16px;
+        border-top: 1px solid #e5e7eb;
+    ">
+        <button 
+            id="refresh-btn-{{ map_id }}" 
+            class="refresh-btn"
+            style="
+                width: 100%;
+                padding: 10px 16px;
+                background: #3b82f6;
+                color: white;
+                border: none;
+                border-radius: 6px;
+                font-size: 14px;
+                font-weight: 500;
+                cursor: pointer;
+                transition: background-color 0.2s;
+            "
+        >
+            Refresh
+        </button>
+        <button 
+            id="update-config-btn-{{ map_id }}" 
+            class="update-config-btn"
+            style="
+                width: 100%;
+                padding: 10px 16px;
+                background: #10b981;
+                color: white;
+                border: none;
+                border-radius: 6px;
+                font-size: 14px;
+                font-weight: 500;
+                cursor: pointer;
+                transition: background-color 0.2s;
+            "
+        >
+            Update Config
+        </button>
+        <button 
+            id="sync-btn-{{ map_id }}" 
+            class="sync-btn"
+            style="
+                width: 100%;
+                padding: 10px 16px;
+                background: #8b5cf6;
+                color: white;
+                border: none;
+                border-radius: 6px;
+                font-size: 14px;
+                font-weight: 500;
+                cursor: pointer;
+                transition: background-color 0.2s;
+            "
+        >
+            Sync from Server
+        </button>
+    </div>
+</div>
+

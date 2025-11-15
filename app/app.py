@@ -208,6 +208,11 @@ def test_map_marker():
     """Map marker test page - minimal test for marker positioning"""
     return render_template('map_marker_test.html')
 
+@app.route('/sync')
+def sync_page():
+    """Location sync management page"""
+    return render_template('sync_page.html')
+
 
 @app.route('/api/health')
 def health():

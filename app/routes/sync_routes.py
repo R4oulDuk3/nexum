@@ -167,6 +167,169 @@ def trigger_sync():
         }), 500
 
 
+@sync_bp.route('/node/list', methods=['GET'])
+@swag_from({
+    'tags': ['sync'],
+    'summary': 'Get list of all node IDs',
+    'description': 'Returns a combined list of this node ID and all peer node IDs',
+    'responses': {
+        200: {
+            'description': 'Node list retrieved successfully',
+            'content': {
+                'application/json': {
+                    'schema': {
+                        'type': 'object',
+                        'properties': {
+                            'status': {'type': 'string', 'example': 'success'},
+                            'node_ids': {
+                                'type': 'array',
+                                'items': {'type': 'string'},
+                                'example': ['aa:aa:aa:aa:aa:aa', 'bb:bb:bb:bb:bb:bb']
+                            }
+                        }
+                    }
+                }
+            }
+        },
+        500: {
+            'description': 'Server error',
+            'content': {
+                'application/json': {
+                    'schema': {
+                        'type': 'object',
+                        'properties': {
+                            'status': {'type': 'string', 'example': 'error'},
+                            'message': {'type': 'string'}
+                        }
+                    }
+                }
+            }
+        }
+    }
+})
+def get_node_list():
+    """Get combined list of this node ID and all peer node IDs"""
+    try:
+        my_node_id = sync_service.get_my_node_id()
+        peers = sync_service.get_all_peers()
+        peer_node_ids = list(peers.keys())
+        
+        # Combine my node ID with peer IDs
+        all_node_ids = [my_node_id] + peer_node_ids
+        
+        return jsonify({
+            'status': 'success',
+            'node_ids': all_node_ids
+        })
+        
+    except Exception as e:
+        return jsonify({
+            'status': 'error',
+            'message': f'Server error: {str(e)}'
+        }), 500
+
+
+@sync_bp.route('/node/<node_id>/data', methods=['GET'])
+@swag_from({
+    'tags': ['sync'],
+    'summary': 'Get node data since timestamp',
+    'description': 'Retrieve location data for a specific node that is newer than the specified timestamp',
+    'parameters': [
+        {
+            'name': 'node_id',
+            'in': 'path',
+            'required': True,
+            'schema': {
+                'type': 'string'
+            },
+            'description': 'Node ID (MAC address)'
+        },
+        {
+            'name': 'since',
+            'in': 'query',
+            'required': False,
+            'schema': {
+                'type': 'integer',
+                'default': 0
+            },
+            'description': 'UTC milliseconds timestamp (optional, defaults to 0)'
+        }
+    ],
+    'responses': {
+        200: {
+            'description': 'Data retrieved successfully',
+            'content': {
+                'application/json': {
+                    'schema': {
+                        'type': 'object',
+                        'properties': {
+                            'status': {'type': 'string', 'example': 'success'},
+                            'count': {'type': 'integer', 'example': 1},
+                            'data': {
+                                'type': 'array',
+                                'items': {'type': 'object'}
+                            }
+                        }
+                    }
+                }
+            }
+        },
+        400: {
+            'description': 'Invalid parameter',
+            'content': {
+                'application/json': {
+                    'schema': {
+                        'type': 'object',
+                        'properties': {
+                            'status': {'type': 'string', 'example': 'error'},
+                            'message': {'type': 'string'}
+                        }
+                    }
+                }
+            }
+        },
+        500: {
+            'description': 'Server error',
+            'content': {
+                'application/json': {
+                    'schema': {
+                        'type': 'object',
+                        'properties': {
+                            'status': {'type': 'string', 'example': 'error'},
+                            'message': {'type': 'string'}
+                        }
+                    }
+                }
+            }
+        }
+    }
+})
+def get_node_data(node_id):
+    """Get location data for a specific node since a timestamp"""
+    try:
+        since = request.args.get('since', type=int, default=0)
+        
+        # Get data from sync service
+        data = sync_service.get_node_data_since(node_id, since)
+        
+        return jsonify({
+            'status': 'success',
+            'count': len(data),
+            'data': data
+        })
+        
+    except ValueError as e:
+        return jsonify({
+            'status': 'error',
+            'message': f'Invalid parameter: {str(e)}'
+        }), 400
+    except Exception as e:
+        return jsonify({
+            'status': 'error',
+            'message': f'Server error: {str(e)}'
+        }), 500
+
+
 @sync_bp.route('/test', methods=['GET'])
 @swag_from({
     'tags': ['sync'],

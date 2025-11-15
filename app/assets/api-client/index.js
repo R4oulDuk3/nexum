@@ -9,3 +9,5 @@ export { LocationRequestSchema } from './models/LocationRequestSchema.js';
 export { NearbyRequestSchema } from './models/NearbyRequestSchema.js';
 export { HealthService } from './services/HealthService.js';
 export { LocationsService } from './services/LocationsService.js';
+export { SyncService } from './services/SyncService.js';
+export { TilesService } from './services/TilesService.js';

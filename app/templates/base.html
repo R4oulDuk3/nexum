@@ -8,6 +8,9 @@
     <!-- Tailwind CSS (local) -->
     <script src="{{ url_for('static', filename='tailwind.js') }}"></script>
     
+    <!-- Dexie.js (loaded as script tag for global access) -->
+    <script src="{{ url_for('static', filename='dexie.js') }}"></script>
+    
     <!-- Location tracking scripts (loaded as ES6 modules) -->
     <script type="module" src="{{ url_for('static', filename='location-sender.js') }}"></script>
     <script type="module" src="{{ url_for('static', filename='location-tracker.js') }}"></script>

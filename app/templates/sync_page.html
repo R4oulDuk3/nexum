@@ -1,0 +1,312 @@
+{% extends "base.html" %}
+
+{% block title %}Sync - Nexum Mesh{% endblock %}
+
+{% block extra_css %}
+<style>
+    .status-indicator {
+        width: 12px;
+        height: 12px;
+        border-radius: 50%;
+        display: inline-block;
+        margin-right: 8px;
+    }
+    .status-success { background-color: #10b981; }
+    .status-error { background-color: #ef4444; }
+    .status-pending { background-color: #f59e0b; }
+    .status-idle { background-color: #6b7280; }
+    
+    .sync-progress {
+        margin-top: 20px;
+        padding: 15px;
+        background-color: #f3f4f6;
+        border-radius: 8px;
+    }
+    
+    .stat-card {
+        background: white;
+        padding: 15px;
+        border-radius: 8px;
+        box-shadow: 0 1px 3px rgba(0,0,0,0.1);
+    }
+    
+    .stat-label {
+        font-size: 0.875rem;
+        color: #6b7280;
+        margin-bottom: 4px;
+    }
+    
+    .stat-value {
+        font-size: 1.5rem;
+        font-weight: bold;
+        color: #111827;
+    }
+</style>
+{% endblock %}
+
+{% block content %}
+<div class="px-4 py-6 sm:px-0">
+    <!-- Header -->
+    <div class="mb-8">
+        <h2 class="text-3xl font-bold text-gray-900">Location Sync</h2>
+        <p class="mt-2 text-sm text-gray-600">Synchronize location data with mesh network nodes</p>
+    </div>
+
+    <!-- Sync Controls -->
+    <div class="bg-white shadow rounded-lg p-6 mb-6">
+        <div class="flex items-center justify-between mb-4">
+            <h3 class="text-lg font-medium text-gray-900">Sync Control</h3>
+            <button 
+                id="syncButton" 
+                onclick="triggerSync()"
+                class="bg-blue-600 hover:bg-blue-700 text-white px-6 py-2 rounded-md text-sm font-medium transition-colors"
+            >
+                Sync All Nodes
+            </button>
+        </div>
+        
+        <div id="syncProgress" class="sync-progress hidden">
+            <div class="flex items-center mb-2">
+                <span class="status-indicator status-pending"></span>
+                <span id="syncStatus" class="text-sm font-medium">Syncing...</span>
+            </div>
+            <div id="syncDetails" class="text-sm text-gray-600"></div>
+        </div>
+    </div>
+
+    <!-- Statistics -->
+    <div class="grid grid-cols-1 md:grid-cols-4 gap-4 mb-6">
+        <div class="stat-card">
+            <div class="stat-label">Total Reports</div>
+            <div id="statTotalReports" class="stat-value">-</div>
+        </div>
+        <div class="stat-card">
+            <div class="stat-label">Unique Entities</div>
+            <div id="statUniqueEntities" class="stat-value">-</div>
+        </div>
+        <div class="stat-card">
+            <div class="stat-label">Nodes</div>
+            <div id="statNodes" class="stat-value">-</div>
+        </div>
+        <div class="stat-card">
+            <div class="stat-label">By Type</div>
+            <div id="statByType" class="text-sm text-gray-600 mt-2">-</div>
+        </div>
+    </div>
+
+    <!-- Node Sync Status -->
+    <div class="bg-white shadow rounded-lg p-6 mb-6">
+        <h3 class="text-lg font-medium text-gray-900 mb-4">Node Sync Status</h3>
+        <div id="nodeStatusList" class="space-y-2">
+            <p class="text-sm text-gray-500">Loading...</p>
+        </div>
+    </div>
+
+    <!-- Local Data Viewer -->
+    <div class="bg-white shadow rounded-lg p-6">
+        <div class="flex items-center justify-between mb-4">
+            <h3 class="text-lg font-medium text-gray-900">Local Data</h3>
+            <button 
+                onclick="refreshDataView()"
+                class="bg-gray-200 hover:bg-gray-300 text-gray-700 px-4 py-2 rounded-md text-sm font-medium transition-colors"
+            >
+                Refresh
+            </button>
+        </div>
+        
+        <div class="mb-4">
+            <label class="block text-sm font-medium text-gray-700 mb-2">Filter by Entity Type</label>
+            <select 
+                id="entityTypeFilter" 
+                onchange="refreshDataView()"
+                class="block w-full rounded-md border-gray-300 shadow-sm p-2 border"
+            >
+                <option value="">All Types</option>
+                <option value="responder">Responder</option>
+                <option value="civilian">Civilian</option>
+                <option value="incident">Incident</option>
+                <option value="resource">Resource</option>
+                <option value="hazard">Hazard</option>
+            </select>
+        </div>
+        
+        <div id="dataView" class="overflow-x-auto">
+            <table class="min-w-full divide-y divide-gray-200">
+                <thead class="bg-gray-50">
+                    <tr>
+                        <th class="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase">Entity ID</th>
+                        <th class="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase">Type</th>
+                        <th class="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase">Position</th>
+                        <th class="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase">Node ID</th>
+                        <th class="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase">Created At</th>
+                    </tr>
+                </thead>
+                <tbody id="dataTableBody" class="bg-white divide-y divide-gray-200">
+                    <tr>
+                        <td colspan="5" class="px-4 py-4 text-sm text-gray-500 text-center">Loading...</td>
+                    </tr>
+                </tbody>
+            </table>
+        </div>
+    </div>
+</div>
+
+<script type="module">
+    import * as LocationSync from "{{ url_for('static', filename='location-sync.js') }}";
+    import * as LocationReader from "{{ url_for('static', filename='location-reader.js') }}";
+    
+    // Make functions globally available
+    window.LocationSync = LocationSync;
+    window.LocationReader = LocationReader;
+    
+    // Refresh functions (define them here so they're in module scope)
+    async function refreshSyncStatus() {
+        try {
+            const statuses = await LocationSync.getSyncStatus();
+            const listEl = document.getElementById('nodeStatusList');
+            
+            if (statuses.length === 0) {
+                listEl.innerHTML = '<p class="text-sm text-gray-500">No nodes found</p>';
+                return;
+            }
+            
+            listEl.innerHTML = statuses.map(status => {
+                const ageMs = status.sync_age_ms || Infinity;
+                const ageMins = Math.floor(ageMs / 60000);
+                const statusClass = ageMs < 60000 ? 'status-success' : 'status-idle';
+                
+                return `
+                    <div class="flex items-center justify-between p-2 bg-gray-50 rounded">
+                        <div>
+                            <span class="status-indicator ${statusClass}"></span>
+                            <span class="text-sm font-medium">${status.node_id}</span>
+                        </div>
+                        <div class="text-sm text-gray-600">
+                            ${status.last_sync_time ? `Last: ${ageMins}m ago` : 'Never synced'}
+                        </div>
+                    </div>
+                `;
+            }).join('');
+        } catch (error) {
+            console.error('Error refreshing sync status:', error);
+            document.getElementById('nodeStatusList').innerHTML = 
+                '<p class="text-sm text-red-500">Error loading sync status</p>';
+        }
+    }
+    
+    // Refresh statistics
+    async function refreshStats() {
+        try {
+            const stats = await LocationReader.getLocationStats();
+            
+            document.getElementById('statTotalReports').textContent = stats.total_reports;
+            document.getElementById('statUniqueEntities').textContent = stats.unique_entities;
+            document.getElementById('statNodes').textContent = stats.nodes_count;
+            
+            const byType = Object.entries(stats.by_entity_type)
+                .map(([type, count]) => `${type}: ${count}`)
+                .join(', ') || 'None';
+            document.getElementById('statByType').textContent = byType;
+            
+        } catch (error) {
+            console.error('Error refreshing stats:', error);
+        }
+    }
+    
+    // Refresh data view
+    async function refreshDataView() {
+        try {
+            const filterType = document.getElementById('entityTypeFilter').value;
+            let locations;
+            
+            if (filterType) {
+                locations = await LocationReader.getLatestLocations([filterType]);
+            } else {
+                locations = await LocationReader.getLatestLocations();
+            }
+            
+            const tbody = document.getElementById('dataTableBody');
+            
+            if (locations.length === 0) {
+                tbody.innerHTML = '<tr><td colspan="5" class="px-4 py-4 text-sm text-gray-500 text-center">No locations found</td></tr>';
+                return;
+            }
+            
+            tbody.innerHTML = locations.map(loc => {
+                const created = new Date(loc.created_at).toLocaleString();
+                const pos = `Lat: ${loc.position.lat.toFixed(6)}, Lon: ${loc.position.lon.toFixed(6)}`;
+                
+                return `
+                    <tr class="hover:bg-gray-50">
+                        <td class="px-4 py-3 text-sm font-mono">${loc.entity_id.substring(0, 8)}...</td>
+                        <td class="px-4 py-3 text-sm">${loc.entity_type}</td>
+                        <td class="px-4 py-3 text-sm text-gray-600">${pos}</td>
+                        <td class="px-4 py-3 text-sm font-mono">${loc.node_id}</td>
+                        <td class="px-4 py-3 text-sm text-gray-600">${created}</td>
+                    </tr>
+                `;
+            }).join('');
+            
+        } catch (error) {
+            console.error('Error refreshing data view:', error);
+            document.getElementById('dataTableBody').innerHTML = 
+                '<tr><td colspan="5" class="px-4 py-4 text-sm text-red-500 text-center">Error loading data</td></tr>';
+        }
+    }
+    
+    // Make refresh functions globally available
+    window.refreshSyncStatus = refreshSyncStatus;
+    window.refreshStats = refreshStats;
+    window.refreshDataView = refreshDataView;
+    
+    // Trigger sync
+    window.triggerSync = async function() {
+        const button = document.getElementById('syncButton');
+        const progress = document.getElementById('syncProgress');
+        const status = document.getElementById('syncStatus');
+        const details = document.getElementById('syncDetails');
+        
+        button.disabled = true;
+        button.textContent = 'Syncing...';
+        progress.classList.remove('hidden');
+        status.textContent = 'Syncing with all nodes...';
+        details.textContent = '';
+        
+        try {
+            const result = await LocationSync.syncAllNodes();
+            
+            status.textContent = `Synced ${result.synced}/${result.total} nodes`;
+            details.textContent = `Total locations: ${result.totalCount}. `;
+            
+            if (result.errors.length > 0) {
+                details.textContent += `Errors: ${result.errors.length}`;
+                console.error('Sync errors:', result.errors);
+            }
+            
+            // Refresh displays
+            refreshSyncStatus();
+            refreshStats();
+            refreshDataView();
+            
+        } catch (error) {
+            status.textContent = 'Sync failed';
+            details.textContent = error.message || String(error);
+            console.error('Sync error:', error);
+        } finally {
+            button.disabled = false;
+            button.textContent = 'Sync All Nodes';
+            
+            // Hide progress after 3 seconds
+            setTimeout(() => {
+                progress.classList.add('hidden');
+            }, 3000);
+        }
+    };
+    
+    // Initial load
+    refreshSyncStatus();
+    refreshStats();
+    refreshDataView();
+</script>
+{% endblock %}
+

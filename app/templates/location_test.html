@@ -310,16 +310,37 @@
         }
 
         // Form event listeners - read from DOM and call API functions
-        document.getElementById('addLocationForm').addEventListener('submit', function(e) {
+        document.getElementById('addLocationForm').addEventListener('submit', async function(e) {
             e.preventDefault();
             
             const entityType = document.getElementById('entityType').value;
             const entityId = generateUUID();
             const nodeId = document.getElementById('nodeId').value;
-            const position = {
-                lat: parseFloat(document.getElementById('latitude').value),
-                lon: parseFloat(document.getElementById('longitude').value)
-            };
+            
+            // Get latitude and longitude from form
+            let latValue = document.getElementById('latitude').value.trim();
+            let lonValue = document.getElementById('longitude').value.trim();
+            
+            let position;
+            
+            // For responders, use random Berlin location if not provided
+            if (entityType === 'responder' && (!latValue || !lonValue)) {
+                const { generateRandomBerlinPosition } = await import("{{ url_for('static', filename='location-utils.js') }}");
+                position = generateRandomBerlinPosition();
+                
+                // Update form fields with generated position
+                document.getElementById('latitude').value = position.lat;
+                document.getElementById('longitude').value = position.lon;
+                
+                console.log('Generated random Berlin position for responder:', position);
+            } else {
+                // Use provided values or default
+                position = {
+                    lat: latValue ? parseFloat(latValue) : 52.5200,
+                    lon: lonValue ? parseFloat(lonValue) : 13.4050
+                };
+            }
+            
             const metadata = {
                 name: document.getElementById('entityName').value || 'Unnamed',
                 status: 'active',

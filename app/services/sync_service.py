@@ -427,10 +427,59 @@ class SyncService:
             import traceback
             traceback.print_exc()
             return []
+    
+    def get_node_data_since(self, node_id: str, from_timestamp: int) -> List[Dict[str, Any]]:
+        """
+        Gets location data for a specific node that is newer than the timestamp.
+        Queries the database for location_reports where node_id matches and created_at > from_timestamp.
+        """
+        try:
+            conn = sqlite3.connect(self.db_path)
+            conn.row_factory = sqlite3.Row
+            cursor = conn.cursor()
+            
+            cursor.execute('''
+                SELECT * FROM location_reports
+                WHERE node_id = ? AND created_at > ?
+                ORDER BY created_at ASC
+            ''', (node_id, from_timestamp))
+            
+            rows = cursor.fetchall()
+            conn.close()
+            
+            # Convert DB rows to LocationReport dataclasses, then to dicts
+            reports = []
+            for row in rows:
+                metadata = {}
+                if row['metadata']:
+                    try:
+                        metadata = json.loads(row['metadata'])
+                    except json.JSONDecodeError:
+                        metadata = {}
+                
+                report = LocationReport(
+                    id=UUID(row['id']),
+                    entity_type=EntityType(row['entity_type']),
+                    entity_id=UUID(row['entity_id']),
+                    node_id=row['node_id'],
+                    position=GeoLocation(
+                        latitude=row['latitude'],
+                        longitude=row['longitude'],
+                        altitude=row['altitude'],
+                        accuracy=row['accuracy']
+                    ),
+                    created_at=row['created_at'],
+                    metadata=metadata
+                )
+                reports.append(report.to_dict())
+            
+            return reports
+            
+        except sqlite3.Error as e:
+            print(f"SyncService: Database error getting node data: {type(e).__name__}: {e}")
+            return []
         except Exception as e:
-            print(f"SyncService: Error getting own data: {type(e).__name__}: {e}")
-            import traceback
-            traceback.print_exc()
+            print(f"SyncService: Error getting node data: {type(e).__name__}: {e}")
             return []
     
     def sync_with_all_peers(self) -> Dict[str, Any]:

@@ -71,7 +71,9 @@ export async function initMap(options = {}) {
         zoom = null,    // If not provided, will fetch from TileJSON
         showControls = true,
         tilesUrl = null,
-        style = null
+        style = null,
+        mapId = 'default',  // Map ID for config
+        config = null  // Optional config object
     } = options;
     console.log('🔍 DEBUG - Parsed options:', { containerId, center, zoom, showControls });
 
@@ -294,6 +296,32 @@ export async function initMap(options = {}) {
         }
     });
 
+    // Set map config if provided, or initialize default config if not exists
+    if (mapId) {
+        try {
+            const { getMapConfig, setMapConfig } = await import('./map-config.js');
+            const { default: db } = await import('./location-sync-db.js');
+            
+            // Check if config exists in DB directly (without creating default)
+            const stored = await db.map_mode.get(mapId);
+            
+            // If config provided in options, use it
+            if (config) {
+                // User provided config - set it
+                await setMapConfig(mapId, config);
+                console.log('🔍 DEBUG - Set provided config for map:', mapId, config);
+            } else if (!stored) {
+                // No config exists in DB - set default only if not exists
+                await setMapConfig(mapId, {
+                    entity_types_to_show: ['responder', 'civilian', 'incident', 'resource', 'hazard']
+                });
+                console.log('🔍 DEBUG - Set default config for map:', mapId);
+            }
+        } catch (error) {
+            console.warn('Error setting map config:', error);
+        }
+    }
+
     // Return map object directly (not wrapped)
     return map;
 }
@@ -406,6 +434,228 @@ export function updateUserMarker(map, long, lat) {
         console.log('🔍 DEBUG - No marker storage for this map, creating new marker');
         addUserMarker(map, long, lat);
         map.setCenter([long, lat]);
+    }
+}
+
+/**
+ * Get or create marker store for a map
+ * @param {maplibregl.Map} map - The MapLibre map instance
+ * @returns {Object} Marker store with entityMarkers Map
+ */
+function ensureMarkerStore(map) {
+    if (!mapMarkers.has(map)) {
+        mapMarkers.set(map, {
+            userMarker: null,
+            entityMarkers: new Map() // Map<key, marker> where key = "entity_id_created_at"
+        });
+    }
+    return mapMarkers.get(map);
+}
+
+/**
+ * Generate unique key for a location
+ * @param {Object} location - Location object with entity_id and created_at
+ * @returns {string} Key in format "entity_id_created_at"
+ */
+function getLocationKey(location) {
+    return `${location.entity_id}_${location.created_at}`;
+}
+
+/**
+ * Get user UUID from localStorage
+ * @returns {string|null} User UUID or null if not set
+ */
+function getUserId() {
+    return localStorage.getItem('user_uuid');
+}
+
+/**
+ * Create marker element based on entity type
+ * If isUser is true, uses user.png regardless of entity type
+ * @param {string} entityType - Type of entity (responder, civilian, incident, resource, hazard)
+ * @param {Object} location - Location object with metadata
+ * @param {boolean} isUser - Whether this is the user's own location
+ * @returns {HTMLElement} Marker element
+ */
+function createMarkerElement(entityType, location, isUser = false) {
+    const el = document.createElement('div');
+    el.className = `entity-marker entity-marker-${entityType}`;
+    if (isUser) {
+        el.className += ' entity-marker-user';
+        el.id = 'user-marker'; // Set ID for easy lookup
+    }
+    
+    // Create container for icon and info
+    const container = document.createElement('div');
+    container.style.display = 'flex';
+    container.style.flexDirection = 'column';
+    container.style.alignItems = 'center';
+    
+    // Icon based on entity type (or user icon if isUser)
+    const icon = document.createElement('img');
+    icon.style.width = '40px';
+    icon.style.height = '40px';
+    icon.style.display = 'block';
+    
+    if (isUser) {
+        // User marker always uses usr.png
+        icon.src = '/assets/images/usr.png';
+        icon.alt = 'You';
+    } else {
+        // Regular entity markers - use default marker for now
+        // You can add specific icons later
+        icon.src = '/assets/images/usr.png'; // Fallback - use user icon as default
+        icon.alt = entityType;
+    }
+    
+    container.appendChild(icon);
+    
+    // Created at timestamp below icon
+    if (location.created_at) {
+        const timestamp = document.createElement('div');
+        timestamp.style.fontSize = '10px';
+        timestamp.style.color = '#666';
+        timestamp.style.marginTop = '2px';
+        timestamp.style.textAlign = 'center';
+        timestamp.style.whiteSpace = 'nowrap';
+        
+        const date = new Date(location.created_at);
+        const timeStr = date.toLocaleTimeString('en-US', { 
+            hour: '2-digit', 
+            minute: '2-digit',
+            hour12: false 
+        });
+        timestamp.textContent = timeStr;
+        container.appendChild(timestamp);
+    }
+    
+    el.appendChild(container);
+    return el;
+}
+
+/**
+ * Clear and set markers on the map based on location list
+ * Efficient diff-based update: only removes/adds what changed
+ * 
+ * @param {maplibregl.Map} map - The MapLibre map instance
+ * @param {Array<Object>} locations - Array of location objects
+ * Each location should have: {entity_id, entity_type, created_at, position: {lat, lon}, metadata}
+ */
+export function clearAndSetMarkers(map, locations = []) {
+    console.log('🔍 DEBUG - clearAndSetMarkers called with', locations.length, 'locations');
+    
+    const store = ensureMarkerStore(map);
+    const entityMarkers = store.entityMarkers;
+    const userId = getUserId();
+    
+    // Check if any location matches the user's entity_id
+    const userLocation = userId ? locations.find(loc => loc.entity_id === userId) : null;
+    
+    // Step 1: Get current keys from map
+    const currentKeys = new Set(entityMarkers.keys());
+    
+    // Step 2: Get new keys from location list
+    const newKeys = new Set(locations.map(loc => getLocationKey(loc)));
+    
+    // Step 3: Find keys to remove (in current but not in new)
+    const keysToRemove = [...currentKeys].filter(key => !newKeys.has(key));
+    
+    // Step 4: Find keys to add (in new but not in current)
+    const keysToAdd = new Set(
+        locations
+            .map(loc => getLocationKey(loc))
+            .filter(key => !currentKeys.has(key))
+    );
+    
+    // Step 5: Remove markers that are no longer in the list
+    keysToRemove.forEach(key => {
+        const marker = entityMarkers.get(key);
+        if (marker && typeof marker.remove === 'function') {
+            marker.remove();
+            console.log('🔍 DEBUG - Removed marker:', key);
+        }
+        entityMarkers.delete(key);
+    });
+    
+    // Also remove user marker if it exists and is being removed
+    if (store.userMarker && keysToRemove.some(key => {
+        const loc = locations.find(l => getLocationKey(l) === key);
+        return loc && loc.entity_id === userId;
+    })) {
+        store.userMarker.remove();
+        store.userMarker = null;
+    }
+    
+    // Step 6: Add new markers
+    locations.forEach(location => {
+        const key = getLocationKey(location);
+        
+        // Only add if not already present
+        if (keysToAdd.has(key)) {
+            // Check if this is the user's location
+            const isUser = userId !== null && location.entity_id === userId;
+            
+            // Create marker element based on entity type (or user marker if isUser)
+            const markerEl = createMarkerElement(location.entity_type, location, isUser);
+            
+            // Create MapLibre marker
+            const marker = new maplibregl.Marker({ 
+                element: markerEl, 
+                anchor: 'bottom' 
+            })
+                .setLngLat([location.position.lon, location.position.lat])
+                .addTo(map);
+            
+            // Store in WeakMap
+            entityMarkers.set(key, marker);
+            
+            // If this is the user's location, also store as userMarker
+            if (isUser) {
+                // Remove old user marker if exists
+                if (store.userMarker) {
+                    store.userMarker.remove();
+                }
+                store.userMarker = marker;
+                console.log('🔍 DEBUG - Added user marker:', key);
+            } else {
+                console.log('🔍 DEBUG - Added marker:', key, location.entity_type);
+            }
+        }
+    });
+    
+    console.log('🔍 DEBUG - Marker update complete. Removed:', keysToRemove.length, 'Added:', keysToAdd.size);
+    if (userLocation) {
+        console.log('🔍 DEBUG - User location found and tracked');
+    }
+}
+
+/**
+ * Refresh map markers based on current config and latest locations from IndexedDB
+ * @param {maplibregl.Map} map - The MapLibre map instance
+ * @param {string} mapId - Map ID (default: 'default')
+ * @returns {Promise<void>}
+ */
+export async function refreshMapMarkers(map, mapId = 'default') {
+    try {
+        // Import modules dynamically to avoid circular dependencies
+        const { getMapConfig } = await import('./map-config.js');
+        const { getLatestLocations } = await import('./location-reader.js');
+        
+        // Get map config (may be null if not exists)
+        const config = await getMapConfig(mapId);
+        // If no config, show all types
+        const entityTypes = config ? (config.entity_types_to_show || []) : ['responder', 'civilian', 'incident', 'resource', 'hazard'];
+        
+        // Get latest locations filtered by selected entity types
+        const locations = await getLatestLocations(entityTypes);
+        
+        // Update map markers
+        clearAndSetMarkers(map, locations);
+        
+        console.log('🔍 DEBUG - Map refreshed with', locations.length, 'locations');
+    } catch (error) {
+        console.error('Error refreshing map markers:', error);
+        throw error;
     }
 }
 
