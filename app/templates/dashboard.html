@@ -84,15 +84,29 @@
 <script src="{{ url_for('static', filename='maplibre-gl.js') }}"></script>
 <script type="module">
     (async function() {
+        console.log('[Dashboard] Starting dashboard initialization...');
+        
+        // Ensure DOM is fully ready
+        if (document.readyState === 'loading') {
+            console.log('[Dashboard] DOM still loading, waiting for DOMContentLoaded...');
+            await new Promise((resolve) => {
+                document.addEventListener('DOMContentLoaded', resolve);
+            });
+        }
+        console.log('[Dashboard] DOM is ready (state: ' + document.readyState + ')');
+        
         // Wait for maplibregl if not yet available
         while (typeof maplibregl === 'undefined') {
+            console.log('[Dashboard] Waiting for maplibregl to be available...');
             await new Promise(resolve => setTimeout(resolve, 50));
         }
+        console.log('[Dashboard] maplibregl is available');
         
         const { initMap } = await import("{{ url_for('static', filename='maplibre-map.js') }}");
         const { initMapControl } = await import("{{ url_for('static', filename='map-control.js') }}");
         const { refreshMapMarkers } = await import("{{ url_for('static', filename='maplibre-map.js') }}");
         const { getLocationStats } = await import("{{ url_for('static', filename='location-reader.js') }}");
+        console.log('[Dashboard] All modules imported successfully');
         
         // Update status bar with entity counts
         async function updateStatusBar() {
@@ -128,7 +142,7 @@
                 }
                 
             } catch (error) {
-                console.error('Error updating status bar:', error);
+                console.error('[Dashboard] Error updating status bar:', error);
                 const statusBarContent = document.getElementById('status-bar-content');
                 if (statusBarContent) {
                     statusBarContent.innerHTML = '<div class="text-sm text-red-500">Error loading status</div>';
@@ -139,97 +153,218 @@
         // Make updateStatusBar globally accessible so map control can call it
         window.updateStatusBar = updateStatusBar;
         
+        // Retry helper function
+        async function initWithRetry(fn, maxRetries = 1, delay = 1000, context = '') {
+            for (let i = 0; i <= maxRetries; i++) {
+                try {
+                    return await fn();
+                } catch (error) {
+                    if (i < maxRetries) {
+                        console.warn(`[Dashboard] ${context} Retry ${i + 1}/${maxRetries} after ${delay}ms...`, error);
+                        await new Promise(resolve => setTimeout(resolve, delay));
+                    } else {
+                        console.error(`[Dashboard] ${context} Failed after ${maxRetries} retries:`, error);
+                        throw error;
+                    }
+                }
+            }
+        }
+        
         try {
+            // Use consistent mapId - 'default' to match template
+            const mapId = 'default';
+            console.log(`[Dashboard] Using mapId: ${mapId}`);
+            
             // Initial status bar update
+            console.log('[Dashboard] Performing initial status bar update...');
             await updateStatusBar();
-            // Initialize map with mapId
+            
+            // Initialize map with consistent mapId
+            console.log(`[Dashboard] Initializing map with mapId: ${mapId}...`);
             const mapInstance = await initMap({
                 containerId: 'dashboard-map',
                 showControls: true,
-                mapId: 'dashboard-map'
+                mapId: mapId
             });
+            console.log('[Dashboard] Map instance created successfully');
             
-            // Drawer controls
+            // Verify and setup drawer controls with defensive checks
+            console.log('[Dashboard] Setting up drawer controls...');
             const drawer = document.getElementById('map-controls-drawer');
             const backdrop = document.getElementById('drawer-backdrop');
             const openBtn = document.getElementById('open-controls-btn');
             
+            if (!drawer) {
+                console.warn('[Dashboard] Drawer element not found!');
+            }
+            if (!backdrop) {
+                console.warn('[Dashboard] Backdrop element not found!');
+            }
+            if (!openBtn) {
+                console.warn('[Dashboard] Open button element not found!');
+            }
+            
             function openDrawer() {
+                if (!drawer || !backdrop) {
+                    console.error('[Dashboard] Cannot open drawer: elements not found');
+                    return;
+                }
                 drawer.classList.add('drawer-open');
                 backdrop.classList.add('backdrop-visible');
                 document.body.style.overflow = 'hidden';
             }
             
             function closeDrawer() {
+                if (!drawer || !backdrop) {
+                    console.error('[Dashboard] Cannot close drawer: elements not found');
+                    return;
+                }
                 drawer.classList.remove('drawer-open');
                 backdrop.classList.remove('backdrop-visible');
                 document.body.style.overflow = '';
             }
             
-            openBtn.addEventListener('click', openDrawer);
-            backdrop.addEventListener('click', closeDrawer);
+            if (openBtn) {
+                openBtn.addEventListener('click', openDrawer);
+                console.log('[Dashboard] Open button event listener attached');
+            }
+            if (backdrop) {
+                backdrop.addEventListener('click', closeDrawer);
+                console.log('[Dashboard] Backdrop event listener attached');
+            }
             
             // Close drawer button (inside drawer)
             const closeBtn = document.getElementById('close-drawer-btn');
             if (closeBtn) {
                 closeBtn.addEventListener('click', closeDrawer);
+                console.log('[Dashboard] Close button event listener attached');
+            } else {
+                console.warn('[Dashboard] Close button not found');
             }
             
             // Close drawer on escape key
             document.addEventListener('keydown', (e) => {
-                if (e.key === 'Escape' && drawer.classList.contains('drawer-open')) {
+                if (e.key === 'Escape' && drawer && drawer.classList.contains('drawer-open')) {
                     closeDrawer();
                 }
             });
             
-            // Wait for map to load
-            mapInstance.once('load', async () => {
-                console.log('Map loaded, initializing map controls...');
-                // Initialize map control (component already rendered in template)
-                await initMapControl('default', mapInstance);
+            // Initialize map features - handles both already-loaded and not-yet-loaded maps
+            async function initializeMapFeatures() {
+                console.log(`[Dashboard] Initializing map features for mapId: ${mapId}...`);
                 
-                // Initial refresh
-                await refreshMapMarkers(mapInstance, 'default');
+                // Check if map is already loaded
+                const isMapLoaded = mapInstance.loaded();
+                console.log(`[Dashboard] Map loaded state: ${isMapLoaded}`);
                 
-                // Update status bar after refresh
-                await updateStatusBar();
-                
-                // Start automatic map refresh every 5 seconds
-                console.log('[MapRefresh] Starting automatic map refresh (interval: 5s)');
-                let mapRefreshInterval = setInterval(async () => {
-                    try {
-                        console.log('[MapRefresh] Automatic refresh triggered');
-                        await refreshMapMarkers(mapInstance, 'default');
-                        // Update status bar after refresh
-                        if (typeof updateStatusBar === 'function') {
-                            await updateStatusBar();
-                        }
-                    } catch (error) {
-                        console.error('[MapRefresh] Error during automatic refresh:', error);
-                    }
-                }, 5000); // 5 seconds
-                
-                // Store interval ID for potential cleanup
-                window.mapRefreshInterval = mapRefreshInterval;
-            });
-            
-            // Cleanup interval on page unload
-            window.addEventListener('beforeunload', () => {
-                if (window.mapRefreshInterval) {
-                    console.log('[MapRefresh] Stopping automatic map refresh');
-                    clearInterval(window.mapRefreshInterval);
-                    window.mapRefreshInterval = null;
+                if (isMapLoaded) {
+                    console.log(`[Dashboard] Map already loaded, initializing features immediately`);
+                    await initMapFeatures();
+                } else {
+                    console.log(`[Dashboard] Map not yet loaded, waiting for load event with timeout...`);
+                    // Wait for map to load with timeout
+                    const loadPromise = new Promise((resolve) => {
+                        mapInstance.once('load', () => {
+                            console.log('[Dashboard] Map load event fired');
+                            resolve();
+                        });
+                    });
+                    
+                    const timeoutPromise = new Promise((resolve) => {
+                        setTimeout(() => {
+                            console.warn(`[Dashboard] Map load timeout (5s), attempting initialization anyway`);
+                            resolve();
+                        }, 5000); // 5 second timeout
+                    });
+                    
+                    await Promise.race([loadPromise, timeoutPromise]);
+                    console.log('[Dashboard] Map load wait completed, initializing features...');
+                    await initMapFeatures();
                 }
-            });
-           
+            }
+            
+            async function initMapFeatures() {
+                try {
+                    // Verify map control element exists
+                    const mapControlElement = document.getElementById(`map-control-${mapId}`);
+                    if (!mapControlElement) {
+                        throw new Error(`Map control element with id "map-control-${mapId}" not found in DOM`);
+                    }
+                    console.log(`[Dashboard] Map control element found: map-control-${mapId}`);
+                    
+                    // Initialize map control with retry
+                    console.log(`[Dashboard] Initializing map control...`);
+                    await initWithRetry(async () => {
+                        await initMapControl(mapId, mapInstance);
+                    }, 2, 1000, 'Map control initialization');
+                    console.log(`[Dashboard] Map control initialized successfully`);
+                    
+                    // Initial refresh with retry
+                    console.log(`[Dashboard] Performing initial marker refresh...`);
+                    await initWithRetry(async () => {
+                        await refreshMapMarkers(mapInstance, mapId);
+                    }, 2, 1000, 'Marker refresh');
+                    console.log(`[Dashboard] Initial markers refreshed successfully`);
+                    
+                    // Update status bar after refresh
+                    await updateStatusBar();
+                    
+                    // Start automatic map refresh every 5 seconds
+                    console.log('[MapRefresh] Starting automatic map refresh (interval: 5s)');
+                    let mapRefreshInterval = setInterval(async () => {
+                        try {
+                            console.log('[MapRefresh] Automatic refresh triggered');
+                            await refreshMapMarkers(mapInstance, mapId);
+                            // Update status bar after refresh
+                            if (typeof window.updateStatusBar === 'function') {
+                                await updateStatusBar();
+                            }
+                        } catch (error) {
+                            console.error('[MapRefresh] Error during automatic refresh:', error);
+                        }
+                    }, 5000); // 5 seconds
+                    
+                    // Store interval ID for potential cleanup
+                    window.mapRefreshInterval = mapRefreshInterval;
+                    console.log('[Dashboard] Automatic refresh interval started');
+                    
+                } catch (error) {
+                    console.error(`[Dashboard] Error initializing map features:`, error);
+                    // Retry once after delay
+                    console.log(`[Dashboard] Retrying map features initialization in 1 second...`);
+                    setTimeout(async () => {
+                        try {
+                            await initMapFeatures();
+                        } catch (retryError) {
+                            console.error(`[Dashboard] Retry failed:`, retryError);
+                        }
+                    }, 1000);
+                }
+            }
+            
+            // Start initialization
+            await initializeMapFeatures();
+            console.log('[Dashboard] Dashboard initialization completed successfully');
             
         } catch (error) {
-            console.error('Error initializing dashboard map:', error);
-            document.getElementById('dashboard-map').innerHTML = 
-                '<div style="display: flex; align-items: center; justify-content: center; height: 100%; color: #ef4444;">' +
-                'Error loading map: ' + error.message +
-                '</div>';
+            console.error('[Dashboard] Error initializing dashboard map:', error);
+            const mapContainer = document.getElementById('dashboard-map');
+            if (mapContainer) {
+                mapContainer.innerHTML = 
+                    '<div style="display: flex; align-items: center; justify-content: center; height: 100%; color: #ef4444;">' +
+                    'Error loading map: ' + error.message +
+                    '</div>';
+            }
         }
+        
+        // Cleanup interval on page unload
+        window.addEventListener('beforeunload', () => {
+            if (window.mapRefreshInterval) {
+                console.log('[MapRefresh] Stopping automatic map refresh');
+                clearInterval(window.mapRefreshInterval);
+                window.mapRefreshInterval = null;
+            }
+        });
     })();
 </script>
 {% endblock %}
