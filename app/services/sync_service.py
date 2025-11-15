@@ -281,10 +281,20 @@ class SyncService:
                 print(f"    VALUES ('{peer_node_id}', '{peer_ip}', {now_ms})")
             
             # Commit the transaction
+            print(f"  Committing transaction...")
             conn.commit()
-            print(f"  Transaction committed")
+            print(f"  ✓ Transaction committed")
+            
+            # Close and reopen connection to ensure we see committed data
+            conn.close()
+            print(f"  Closed connection, reopening to verify...")
+            
+            # Reopen connection to verify committed data
+            conn = sqlite3.connect(self.db_path)
+            cursor = conn.cursor()
             
             # Verify the update/insert by querying the table
+            print(f"  Querying sync_log table to verify update...")
             cursor.execute('SELECT peer_node_id, last_known_ip, last_sync_at FROM sync_log WHERE peer_node_id = ?', (peer_node_id,))
             verify_row = cursor.fetchone()
             
@@ -293,20 +303,28 @@ class SyncService:
                 verify_ip = verify_row[1] if verify_row[1] else 'unknown'
                 verify_readable = datetime.fromtimestamp(verify_timestamp / 1000, tz=timezone.utc).isoformat() if verify_timestamp > 0 else 'never'
                 
-                print(f"  ✓ VERIFICATION - Entry in sync_log table:")
+                print(f"  ✓ VERIFICATION - Entry found in sync_log table:")
                 print(f"    peer_node_id: '{verify_row[0]}'")
                 print(f"    last_known_ip: '{verify_ip}'")
                 print(f"    last_sync_at: {verify_timestamp}")
                 print(f"    last_sync_at_readable: {verify_readable}")
                 
                 if verify_timestamp == now_ms and verify_ip == peer_ip:
-                    print(f"  ✓ VERIFICATION PASSED - Data matches!")
+                    print(f"  ✓✓✓ VERIFICATION PASSED - Data matches expected values!")
+                    print(f"      Timestamp updated from old value to {now_ms}")
+                elif verify_timestamp == 0:
+                    print(f"  ✗✗✗ VERIFICATION FAILED - Timestamp is still 0!")
+                    print(f"      Expected timestamp: {now_ms}")
+                    print(f"      Got timestamp: {verify_timestamp}")
+                    print(f"      This means the UPDATE/INSERT did not update the timestamp properly")
                 else:
                     print(f"  ✗ VERIFICATION FAILED - Data mismatch!")
                     print(f"    Expected timestamp: {now_ms}, Got: {verify_timestamp}")
                     print(f"    Expected IP: {peer_ip}, Got: {verify_ip}")
             else:
-                print(f"  ✗ VERIFICATION FAILED - Entry not found in table after insert/update!")
+                print(f"  ✗✗✗ VERIFICATION FAILED - Entry not found in table after insert/update!")
+                print(f"      Query: SELECT * FROM sync_log WHERE peer_node_id = '{peer_node_id}'")
+                print(f"      This means the INSERT/UPDATE failed or entry was deleted")
             
             # Also show all entries in sync_log for debugging
             cursor.execute('SELECT COUNT(*) FROM sync_log')
@@ -459,9 +477,11 @@ class SyncService:
             data_list = response_data.get('data', [])
             count = response_data.get('count', 0)
             
-            print(f"  Successfully pulled {count} location reports from {peer_ip}")
+            status_msg = f"Pulled {count} new reports from {peer_ip}"
+            print(f"  ✓ Successfully pulled {count} location reports from {peer_ip}")
+            print(f"  Return value: status_msg='{status_msg}', data_list length={len(data_list)}")
             
-            return (f"Pulled {count} new reports from {peer_ip}", data_list)
+            return (status_msg, data_list)
             
         except requests.exceptions.Timeout:
             error_msg = f"Timeout connecting to {peer_ip} (peer may be slow or unreachable)"
@@ -861,7 +881,15 @@ class SyncService:
                 status_msg, data_list = self.pull_data_from_peer(peer_ip, last_sync)
                 
                 # Check if pull was successful (has data or success message)
-                if data_list or status_msg.startswith("Pulled"):
+                print(f"\n  Checking if pull was successful...")
+                print(f"    data_list: {data_list} (type: {type(data_list)}, length: {len(data_list) if data_list else 0})")
+                print(f"    status_msg: '{status_msg}'")
+                print(f"    status_msg.startswith('Pulled'): {status_msg.startswith('Pulled') if status_msg else False}")
+                
+                is_successful = data_list or (status_msg and status_msg.startswith("Pulled"))
+                print(f"    Pull successful? {is_successful}")
+                
+                if is_successful:
                     # Save the location reports to database
                     if data_list:
                         saved_count, skipped_count = self.save_location_reports(data_list)
@@ -876,25 +904,44 @@ class SyncService:
                         results["messages"].append(f"Peer {peer_mac} ({peer_ip}): {status_msg}")
                     
                     # Update sync time since pull was successful (even if no new data)
-                    print(f"\n  About to update sync_log for {peer_mac} ({peer_ip})...")
+                    print(f"\n  ============================================================")
+                    print(f"  About to update sync_log for {peer_mac} ({peer_ip})...")
+                    print(f"  ============================================================")
+                    
+                    # Get current timestamp BEFORE update to compare
+                    before_update = self.get_last_sync_time(peer_mac)
+                    print(f"  Current timestamp BEFORE update: {before_update}")
+                    
+                    # Call update function
+                    print(f"  Calling update_last_sync_time('{peer_mac}', '{peer_ip}')...")
                     self.update_last_sync_time(peer_mac, peer_ip)
+                    print(f"  Returned from update_last_sync_time()")
+                    
                     results["peers_synced"] += 1
                     
-                    # Verify sync_log update by querying
+                    # Verify sync_log update by querying IMMEDIATELY after update
+                    print(f"\n  Verifying sync_log update...")
                     new_sync_time = self.get_last_sync_time(peer_mac)
-                    print(f"  Verification query: last_sync_at for {peer_mac} = {new_sync_time}")
+                    print(f"  Timestamp AFTER update: {new_sync_time}")
+                    print(f"  Timestamp BEFORE update: {before_update}")
                     
-                    if new_sync_time > 0:
+                    if new_sync_time > 0 and new_sync_time != before_update:
                         new_readable = datetime.fromtimestamp(new_sync_time / 1000, tz=timezone.utc).isoformat()
-                        print(f"  ✓ Sync_log successfully updated: {new_sync_time} ({new_readable})")
+                        print(f"  ✓ SUCCESS: Sync_log updated from {before_update} to {new_sync_time}")
+                        print(f"    Readable: {new_readable}")
+                    elif new_sync_time == before_update:
+                        print(f"  ✗ ERROR: Timestamp did NOT change! Still {new_sync_time}")
+                        print(f"    This means update_last_sync_time() did not update the timestamp")
                     else:
                         print(f"  ✗ WARNING: Sync_log update may have failed (timestamp is 0)")
+                    print(f"  ============================================================\n")
                 else:
                     # Pull failed, add to errors
                     error_msg = f"Failed to pull from {peer_mac} ({peer_ip}): {status_msg}"
                     results["errors"].append(error_msg)
                     results["messages"].append(error_msg)
-                    print(f"  Sync_log NOT updated (pull failed)")
+                    print(f"  ✗ Sync_log NOT updated (pull failed)")
+                    print(f"    Reason: data_list is empty and status_msg doesn't start with 'Pulled'")
                 
             except Exception as e:
                 error_msg = f"Error syncing with {peer_mac} ({peer_ip}): {str(e)}"
