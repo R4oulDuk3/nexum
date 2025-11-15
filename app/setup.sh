@@ -29,6 +29,10 @@ echo "Installing dependencies..."
 pip install --upgrade pip
 pip install -r requirements.txt
 
+# Ensure requests is installed (required for sync service)
+echo "Ensuring requests library is installed..."
+pip install "requests>=2.31.0"
+
 # Create data directory
 mkdir -p data
 
