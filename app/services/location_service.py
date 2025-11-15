@@ -302,6 +302,57 @@ class LocationService:
         
         return [self._row_to_report(row) for row in rows]
     
+    def print_all_database_tables(self):
+        """
+        Print all database tables to console for debugging.
+        Useful for testing to see what's in the database.
+        """
+        try:
+            conn = sqlite3.connect(self.db_path)
+            conn.row_factory = sqlite3.Row
+            cursor = conn.cursor()
+            
+            # Get all table names
+            cursor.execute("SELECT name FROM sqlite_master WHERE type='table'")
+            tables = cursor.fetchall()
+            
+            print("\n" + "="*80)
+            print("DATABASE TABLES DEBUG OUTPUT")
+            print("="*80)
+            
+            for table_row in tables:
+                table_name = table_row['name']
+                print(f"\n--- Table: {table_name} ---")
+                
+                # Get all rows from table
+                cursor.execute(f"SELECT * FROM {table_name}")
+                rows = cursor.fetchall()
+                
+                if len(rows) == 0:
+                    print("  (empty)")
+                else:
+                    # Print column names
+                    column_names = [description[0] for description in cursor.description]
+                    print(f"  Columns: {', '.join(column_names)}")
+                    print(f"  Rows: {len(rows)}")
+                    
+                    # Print each row
+                    for i, row in enumerate(rows, 1):
+                        print(f"\n  Row {i}:")
+                        for col_name in column_names:
+                            value = row[col_name]
+                            # Truncate long values for readability
+                            if isinstance(value, str) and len(value) > 100:
+                                value = value[:100] + "..."
+                            print(f"    {col_name}: {value}")
+            
+            print("\n" + "="*80 + "\n")
+            conn.close()
+        except Exception as e:
+            print(f"LocationService: Error printing database tables: {e}")
+            import traceback
+            traceback.print_exc()
+    
     def _row_to_report(self, row: sqlite3.Row) -> LocationReport:
         """Convert database row to LocationReport"""
         metadata = {}

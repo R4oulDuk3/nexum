@@ -8,7 +8,7 @@ import platform
 import uuid
 import sqlite3
 import re
-from typing import List, Dict, Any, Optional
+from typing import List, Dict, Any, Optional, Tuple
 from datetime import datetime, timezone
 from pathlib import Path
 from uuid import UUID
@@ -23,6 +23,7 @@ except ImportError:
 sys.path.append(str(Path(__file__).parent.parent))
 
 from services.cluster_service import get_cluster_service
+from services.location_service import LocationService
 from models.location import LocationReport, EntityType, GeoLocation
 
 
@@ -34,6 +35,7 @@ class SyncService:
             db_path = str(Path(__file__).parent.parent / 'data' / 'messaging.db')
         self.db_path = db_path
         self.cluster_service = cluster_service or get_cluster_service()
+        self.location_service = LocationService(db_path)
         self.ip_range_base = "169.254"  # From setup-mesh.sh
         self._my_node_id = None
     
@@ -222,13 +224,111 @@ class SyncService:
         except Exception as e:
             print(f"SyncService: Error updating sync time for {peer_node_id}: {e}")
     
-    def pull_data_from_peer(self, peer_ip: str, since_timestamp: int) -> str:
+    def log_incoming_sync_request(self, peer_ip: str, peer_node_id: Optional[str] = None):
+        """
+        Log when a peer pulls data from us (incoming sync request).
+        If we don't know the peer's node_id, we'll try to find it from IP or create a placeholder entry.
+        
+        Args:
+            peer_ip: IP address of the peer making the request
+            peer_node_id: Optional node ID (MAC address) of the peer
+        """
+        try:
+            # If we don't have node_id, try to find it from peers list or use IP as identifier
+            if peer_node_id is None:
+                # Try to find node_id from known peers by IP
+                peers = self.get_all_peers()
+                for mac, ip in peers.items():
+                    if ip == peer_ip:
+                        peer_node_id = mac
+                        break
+                
+                # If still not found, use IP as temporary identifier
+                # (Note: sync_log uses peer_node_id as primary key, so this won't work perfectly)
+                # For now, we'll just log it if we can find a matching peer
+                if peer_node_id is None:
+                    print(f"SyncService: Incoming sync request from {peer_ip} - peer not in known peers list, skipping log")
+                    return
+            
+            now_ms = int(datetime.now(timezone.utc).timestamp() * 1000)
+            conn = sqlite3.connect(self.db_path)
+            cursor = conn.cursor()
+            
+            # Check if entry exists
+            cursor.execute('SELECT peer_node_id FROM sync_log WHERE peer_node_id = ?', (peer_node_id,))
+            exists = cursor.fetchone()
+            
+            if exists:
+                # Update the entry (update IP if changed, but don't update last_sync_at)
+                # The last_sync_at in this table tracks when WE synced with THEM, not when they sync with us
+                # But we can still log the IP
+                cursor.execute('''
+                    UPDATE sync_log 
+                    SET last_known_ip = ?
+                    WHERE peer_node_id = ?
+                ''', (peer_ip, peer_node_id))
+            else:
+                # Create new entry with last_sync_at = 0 since we haven't synced with them yet
+                cursor.execute('''
+                    INSERT INTO sync_log (peer_node_id, last_known_ip, last_sync_at)
+                    VALUES (?, ?, ?)
+                ''', (peer_node_id, peer_ip, 0))
+            
+            conn.commit()
+            conn.close()
+            print(f"SyncService: Logged incoming sync request from peer {peer_node_id} ({peer_ip})")
+        except Exception as e:
+            print(f"SyncService: Error logging incoming sync request from {peer_ip}: {e}")
+    
+    def _extract_connection_error_type(self, error: Exception) -> str:
+        """
+        Extract a more specific error type from connection errors.
+        
+        Returns:
+            A concise error description (e.g., "No route to host", "Connection refused", etc.)
+        """
+        error_str = str(error).lower()
+        
+        # Check for common routing/network errors
+        if "no route to host" in error_str or "errno 113" in error_str:
+            return "No route to host (check mesh network routing)"
+        elif "connection refused" in error_str or "errno 111" in error_str:
+            return "Connection refused (peer may not be running service on port 5000)"
+        elif "name or service not known" in error_str or "nodename nor servname" in error_str:
+            return "DNS/hostname resolution failed"
+        elif "network is unreachable" in error_str or "errno 101" in error_str:
+            return "Network unreachable"
+        elif "connection timed out" in error_str or "timed out" in error_str:
+            return "Connection timeout (peer may be slow or unreachable)"
+        elif "timeout" in error_str:
+            return "Request timeout"
+        else:
+            # Return a shorter version of the full error
+            error_msg = str(error)
+            # Try to extract the most relevant part
+            if "HTTPConnectionPool" in error_msg:
+                # Extract the reason from the HTTPConnectionPool error
+                if "Failed to establish" in error_msg:
+                    # Try to get the actual error reason
+                    if ":" in error_msg:
+                        parts = error_msg.split(":")
+                        if len(parts) > 1:
+                            reason = parts[-1].strip()
+                            return f"Connection failed: {reason}"
+            return f"Connection error: {error_msg[:150]}"  # Limit length
+    
+    def pull_data_from_peer(self, peer_ip: str, since_timestamp: int) -> Tuple[str, List[Dict[str, Any]]]:
         """
         Pulls new data from a peer's /api/sync endpoint.
-        Calls the peer's API and prints the received data (does not save to DB yet).
+        
+        Returns:
+            Tuple of (status_message, data_list) where:
+            - status_message: Human-readable status message
+            - data_list: List of location report dicts (empty on error)
         """
         if requests is None:
-            return f"Error: 'requests' library not installed. Cannot pull data from {peer_ip}"
+            error_msg = f"Error: 'requests' library not installed. Cannot pull data from {peer_ip}"
+            return (error_msg, [])
         
         try:
             url = f"http://{peer_ip}:5000/api/sync?since={since_timestamp}"
@@ -244,46 +344,92 @@ class SyncService:
             if response_data.get('status') != 'success':
                 error_msg = f"Peer returned error: {response_data.get('message', 'Unknown error')}"
                 print(f"  Error: {error_msg}")
-                return error_msg
+                return (error_msg, [])
             
             # Get the data array from the response
             data_list = response_data.get('data', [])
             count = response_data.get('count', 0)
             
             print(f"  Successfully pulled {count} location reports from {peer_ip}")
-            print(f"  Data received:")
-            for i, report in enumerate(data_list, 1):
-                print(f"    Report {i}:")
-                print(f"      ID: {report.get('id')}")
-                print(f"      Entity Type: {report.get('entity_type')}")
-                print(f"      Entity ID: {report.get('entity_id')}")
-                print(f"      Node ID: {report.get('node_id')}")
-                print(f"      Position: {report.get('position')}")
-                print(f"      Created At: {report.get('created_at')}")
-                print(f"      Metadata: {report.get('metadata')}")
             
-            return f"Pulled {count} new reports from {peer_ip} (printed, not saved to DB)"
+            return (f"Pulled {count} new reports from {peer_ip}", data_list)
             
         except requests.exceptions.Timeout:
-            error_msg = f"Timeout connecting to {peer_ip}"
+            error_msg = f"Timeout connecting to {peer_ip} (peer may be slow or unreachable)"
             print(f"  Error: {error_msg}")
-            return error_msg
+            return (error_msg, [])
         except requests.exceptions.ConnectionError as e:
-            error_msg = f"Connection error to {peer_ip}: {str(e)}"
+            # Extract more specific error information
+            specific_error = self._extract_connection_error_type(e)
+            error_msg = f"Connection error to {peer_ip}: {specific_error}"
             print(f"  Error: {error_msg}")
-            return error_msg
+            print(f"  Full error details: {str(e)}")
+            return (error_msg, [])
         except requests.exceptions.RequestException as e:
-            error_msg = f"Request failed: {str(e)}"
+            error_msg = f"Request failed to {peer_ip}: {str(e)[:200]}"
             print(f"  Error: {error_msg}")
-            return error_msg
+            return (error_msg, [])
         except json.JSONDecodeError as e:
             error_msg = f"Failed to parse response from {peer_ip}: {str(e)}"
             print(f"  Error: {error_msg}")
-            return error_msg
+            return (error_msg, [])
         except Exception as e:
             error_msg = f"Unexpected error pulling data from {peer_ip}: {str(e)}"
             print(f"  Error: {error_msg}")
-            return error_msg
+            return (error_msg, [])
+    
+    def save_location_reports(self, reports: List[Dict[str, Any]]) -> Tuple[int, int]:
+        """
+        Save location reports from peer data to the database.
+        
+        Args:
+            reports: List of location report dicts (from peer API response)
+            
+        Returns:
+            Tuple of (saved_count, skipped_count) where:
+            - saved_count: Number of reports successfully saved
+            - skipped_count: Number of reports skipped (duplicates or errors)
+        """
+        saved_count = 0
+        skipped_count = 0
+        
+        for report_dict in reports:
+            try:
+                # Convert dict to LocationReport object
+                report = LocationReport.from_dict(report_dict)
+                
+                # Check if this report already exists (by id)
+                try:
+                    conn = sqlite3.connect(self.db_path)
+                    cursor = conn.cursor()
+                    cursor.execute('SELECT id FROM location_reports WHERE id = ?', (str(report.id),))
+                    exists = cursor.fetchone()
+                    conn.close()
+                    
+                    if exists:
+                        print(f"  Skipping duplicate report ID: {report.id}")
+                        skipped_count += 1
+                        continue
+                except Exception as e:
+                    print(f"  Warning: Error checking for duplicate report {report.id}: {e}")
+                    # Continue anyway - try to save and catch duplicate error
+                
+                # Save the report using LocationService
+                # Wrap in try/except to catch IntegrityError if duplicate somehow gets through
+                try:
+                    self.location_service.add_location(report)
+                    saved_count += 1
+                except sqlite3.IntegrityError:
+                    # Duplicate primary key - already exists
+                    print(f"  Skipping duplicate report ID (integrity error): {report.id}")
+                    skipped_count += 1
+                
+            except Exception as e:
+                print(f"  Error saving report: {e}")
+                print(f"    Report data: {report_dict}")
+                skipped_count += 1
+        
+        return (saved_count, skipped_count)
     
     def get_own_data_since(self, since_timestamp: int) -> List[Dict[str, Any]]:
         """
@@ -485,12 +631,16 @@ class SyncService:
     def sync_with_all_peers(self) -> Dict[str, Any]:
         """
         Syncs with all visible peers in the mesh network.
+        Pulls data from peers and saves it to the database.
         Returns a summary of the sync operation.
         """
         peers = self.get_all_peers()
         results = {
             "peers_found": len(peers),
             "peers_synced": 0,
+            "total_reports_pulled": 0,
+            "total_reports_saved": 0,
+            "total_reports_skipped": 0,
             "errors": [],
             "messages": []
         }
@@ -503,21 +653,36 @@ class SyncService:
                 last_sync = self.get_last_sync_time(peer_mac)
                 
                 # Pull data from peer
-                pull_result = self.pull_data_from_peer(peer_ip, last_sync)
-                results["messages"].append(f"Peer {peer_mac} ({peer_ip}): {pull_result}")
+                status_msg, data_list = self.pull_data_from_peer(peer_ip, last_sync)
                 
-                # Check if pull was successful (not an error message)
-                if pull_result.startswith("Pulled") or "new reports" in pull_result:
+                # Check if pull was successful (has data or success message)
+                if data_list or status_msg.startswith("Pulled"):
+                    # Save the location reports to database
+                    if data_list:
+                        saved_count, skipped_count = self.save_location_reports(data_list)
+                        results["total_reports_pulled"] += len(data_list)
+                        results["total_reports_saved"] += saved_count
+                        results["total_reports_skipped"] += skipped_count
+                        
+                        msg = f"Peer {peer_mac} ({peer_ip}): {status_msg} - Saved {saved_count}, Skipped {skipped_count}"
+                        results["messages"].append(msg)
+                        print(f"  {msg}")
+                    else:
+                        results["messages"].append(f"Peer {peer_mac} ({peer_ip}): {status_msg}")
+                    
                     # Update sync time only if pull was successful
                     self.update_last_sync_time(peer_mac, peer_ip)
                     results["peers_synced"] += 1
                 else:
                     # Pull failed, add to errors
-                    results["errors"].append(f"Failed to pull from {peer_mac} ({peer_ip}): {pull_result}")
+                    error_msg = f"Failed to pull from {peer_mac} ({peer_ip}): {status_msg}"
+                    results["errors"].append(error_msg)
+                    results["messages"].append(error_msg)
                 
             except Exception as e:
                 error_msg = f"Error syncing with {peer_mac} ({peer_ip}): {str(e)}"
                 results["errors"].append(error_msg)
+                results["messages"].append(error_msg)
                 print(f"SyncService: {error_msg}")
         
         return results
@@ -525,7 +690,7 @@ class SyncService:
     def test_pull_all_peers(self, since_timestamp: int = 0) -> Dict[str, Any]:
         """
         Test function that pulls data from all peers with a given timestamp.
-        This is a simpler version for testing - it doesn't update sync logs.
+        This version saves the data to the database but doesn't update sync logs.
         
         Args:
             since_timestamp: Timestamp to use for all peers (default: 0)
@@ -537,6 +702,9 @@ class SyncService:
         results = {
             "peers_found": len(peers),
             "peers_attempted": 0,
+            "total_reports_pulled": 0,
+            "total_reports_saved": 0,
+            "total_reports_skipped": 0,
             "messages": [],
             "errors": []
         }
@@ -548,24 +716,56 @@ class SyncService:
                 results["peers_attempted"] += 1
                 print(f"\nTest: Attempting to pull from peer {peer_mac} ({peer_ip})...")
                 
-                # Pull data from peer (will print to console)
-                pull_result = self.pull_data_from_peer(peer_ip, since_timestamp)
-                results["messages"].append(f"Peer {peer_mac} ({peer_ip}): {pull_result}")
+                # Pull data from peer
+                status_msg, data_list = self.pull_data_from_peer(peer_ip, since_timestamp)
                 
                 # Check if it was successful
-                if pull_result.startswith("Pulled") or "new reports" in pull_result:
-                    print(f"Test: ✓ Successfully pulled from {peer_mac}")
+                if data_list or status_msg.startswith("Pulled"):
+                    # Save the location reports to database
+                    if data_list:
+                        # Print pulled data for testing
+                        print(f"\nTest: Data pulled from {peer_mac} ({peer_ip}):")
+                        print(f"  Number of reports: {len(data_list)}")
+                        for i, report in enumerate(data_list, 1):
+                            print(f"  Report {i}:")
+                            print(f"    ID: {report.get('id')}")
+                            print(f"    Entity Type: {report.get('entity_type')}")
+                            print(f"    Entity ID: {report.get('entity_id')}")
+                            print(f"    Node ID: {report.get('node_id')}")
+                            print(f"    Position: lat={report.get('position', {}).get('lat')}, lon={report.get('position', {}).get('lon')}")
+                            print(f"    Created At: {report.get('created_at')}")
+                            if report.get('metadata'):
+                                print(f"    Metadata: {report.get('metadata')}")
+                        print()  # Empty line for readability
+                        
+                        saved_count, skipped_count = self.save_location_reports(data_list)
+                        results["total_reports_pulled"] += len(data_list)
+                        results["total_reports_saved"] += saved_count
+                        results["total_reports_skipped"] += skipped_count
+                        
+                        msg = f"Peer {peer_mac} ({peer_ip}): {status_msg} - Saved {saved_count}, Skipped {skipped_count}"
+                        results["messages"].append(msg)
+                        print(f"Test: ✓ Successfully pulled and saved data from {peer_mac}")
+                        print(f"      {msg}")
+                    else:
+                        results["messages"].append(f"Peer {peer_mac} ({peer_ip}): {status_msg}")
+                        print(f"Test: ✓ Successfully pulled from {peer_mac} (no new data)")
                 else:
-                    results["errors"].append(f"Peer {peer_mac} ({peer_ip}): {pull_result}")
+                    error_msg = f"Peer {peer_mac} ({peer_ip}): {status_msg}"
+                    results["errors"].append(error_msg)
+                    results["messages"].append(error_msg)
                     print(f"Test: ✗ Failed to pull from {peer_mac}")
                     
             except Exception as e:
                 error_msg = f"Error testing pull from {peer_mac} ({peer_ip}): {str(e)}"
                 results["errors"].append(error_msg)
+                results["messages"].append(error_msg)
                 print(f"Test: Exception - {error_msg}")
         
         print(f"\nTest: Completed. Attempted {results['peers_attempted']} peers, "
-              f"{len([m for m in results['messages'] if 'Pulled' in m])} successful, "
+              f"Pulled {results['total_reports_pulled']} reports, "
+              f"Saved {results['total_reports_saved']}, "
+              f"Skipped {results['total_reports_skipped']}, "
               f"{len(results['errors'])} errors")
         
         return results
