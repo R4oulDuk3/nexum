@@ -1,132 +1,67 @@
 {% set map_id = map_id or 'default' %}
-<div id="map-control-{{ map_id }}" class="map-control" style="
-    position: absolute;
-    top: 10px;
-    right: 10px;
-    background: white;
-    border-radius: 8px;
-    box-shadow: 0 2px 8px rgba(0, 0, 0, 0.15);
-    padding: 16px;
-    z-index: 1000;
-    min-width: 220px;
-    max-height: 85vh;
-    overflow-y: auto;
-    font-family: system-ui, -apple-system, sans-serif;
-">
+<div id="map-control-{{ map_id }}" class="map-control bg-white rounded-lg shadow-sm p-4 border border-gray-200">
     <!-- Header -->
-    <div style="
-        font-weight: 600;
-        font-size: 16px;
-        color: #111827;
-        margin-bottom: 16px;
-        padding-bottom: 12px;
-        border-bottom: 2px solid #e5e7eb;
-    ">
+    <div class="font-semibold text-base text-gray-900 mb-4 pb-3 border-b border-gray-200">
         Map Controls
     </div>
 
-    <!-- Entity Types Section -->
-    <div style="margin-bottom: 16px;">
-        <div style="
-            font-size: 13px;
-            font-weight: 600;
-            color: #374151;
-            margin-bottom: 12px;
-        ">
-            Show Entity Types
+    <!-- Controls Container - Row on desktop, Column on mobile -->
+    <div class="flex flex-col md:flex-row md:items-start md:gap-6 gap-4">
+        <!-- Entity Types Section -->
+        <div class="flex-shrink-0 md:min-w-[200px]">
+            <div class="text-sm font-semibold text-gray-700 mb-3">
+                Show Entity Types
+            </div>
+            
+            <!-- Checkboxes - Column on mobile, can wrap on desktop -->
+            <div class="flex flex-col md:flex-col gap-2">
+                <label class="flex items-center gap-2 cursor-pointer text-sm text-gray-700 py-1 select-none">
+                    <input type="checkbox" class="entity-type-checkbox w-4 h-4 cursor-pointer accent-blue-600" value="responder">
+                    <span>Responders</span>
+                </label>
+                <label class="flex items-center gap-2 cursor-pointer text-sm text-gray-700 py-1 select-none">
+                    <input type="checkbox" class="entity-type-checkbox w-4 h-4 cursor-pointer accent-blue-600" value="civilian">
+                    <span>Civilians</span>
+                </label>
+                <label class="flex items-center gap-2 cursor-pointer text-sm text-gray-700 py-1 select-none">
+                    <input type="checkbox" class="entity-type-checkbox w-4 h-4 cursor-pointer accent-blue-600" value="incident">
+                    <span>Incidents</span>
+                </label>
+                <label class="flex items-center gap-2 cursor-pointer text-sm text-gray-700 py-1 select-none">
+                    <input type="checkbox" class="entity-type-checkbox w-4 h-4 cursor-pointer accent-blue-600" value="resource">
+                    <span>Resources</span>
+                </label>
+                <label class="flex items-center gap-2 cursor-pointer text-sm text-gray-700 py-1 select-none">
+                    <input type="checkbox" class="entity-type-checkbox w-4 h-4 cursor-pointer accent-blue-600" value="hazard">
+                    <span>Hazards</span>
+                </label>
+            </div>
         </div>
-        
-        <div style="
-            display: flex;
-            flex-direction: column;
-            gap: 10px;
-        ">
-            <label style="display: flex; align-items: center; gap: 10px; cursor: pointer; font-size: 14px; color: #374151; padding: 6px 0; user-select: none;">
-                <input type="checkbox" class="entity-type-checkbox" value="responder" style="width: 18px; height: 18px; cursor: pointer; accent-color: #3b82f6;">
-                <span>Responders</span>
-            </label>
-            <label style="display: flex; align-items: center; gap: 10px; cursor: pointer; font-size: 14px; color: #374151; padding: 6px 0; user-select: none;">
-                <input type="checkbox" class="entity-type-checkbox" value="civilian" style="width: 18px; height: 18px; cursor: pointer; accent-color: #3b82f6;">
-                <span>Civilians</span>
-            </label>
-            <label style="display: flex; align-items: center; gap: 10px; cursor: pointer; font-size: 14px; color: #374151; padding: 6px 0; user-select: none;">
-                <input type="checkbox" class="entity-type-checkbox" value="incident" style="width: 18px; height: 18px; cursor: pointer; accent-color: #3b82f6;">
-                <span>Incidents</span>
-            </label>
-            <label style="display: flex; align-items: center; gap: 10px; cursor: pointer; font-size: 14px; color: #374151; padding: 6px 0; user-select: none;">
-                <input type="checkbox" class="entity-type-checkbox" value="resource" style="width: 18px; height: 18px; cursor: pointer; accent-color: #3b82f6;">
-                <span>Resources</span>
-            </label>
-            <label style="display: flex; align-items: center; gap: 10px; cursor: pointer; font-size: 14px; color: #374151; padding: 6px 0; user-select: none;">
-                <input type="checkbox" class="entity-type-checkbox" value="hazard" style="width: 18px; height: 18px; cursor: pointer; accent-color: #3b82f6;">
-                <span>Hazards</span>
-            </label>
-        </div>
-    </div>
 
-    <!-- Buttons Section -->
-    <div style="
-        display: flex;
-        flex-direction: column;
-        gap: 8px;
-        margin-top: 16px;
-        padding-top: 16px;
-        border-top: 1px solid #e5e7eb;
-    ">
-        <button 
-            id="refresh-btn-{{ map_id }}" 
-            class="refresh-btn"
-            style="
-                width: 100%;
-                padding: 10px 16px;
-                background: #3b82f6;
-                color: white;
-                border: none;
-                border-radius: 6px;
-                font-size: 14px;
-                font-weight: 500;
-                cursor: pointer;
-                transition: background-color 0.2s;
-            "
-        >
-            Refresh
-        </button>
-        <button 
-            id="update-config-btn-{{ map_id }}" 
-            class="update-config-btn"
-            style="
-                width: 100%;
-                padding: 10px 16px;
-                background: #10b981;
-                color: white;
-                border: none;
-                border-radius: 6px;
-                font-size: 14px;
-                font-weight: 500;
-                cursor: pointer;
-                transition: background-color 0.2s;
-            "
-        >
-            Update Config
-        </button>
-        <button 
-            id="sync-btn-{{ map_id }}" 
-            class="sync-btn"
-            style="
-                width: 100%;
-                padding: 10px 16px;
-                background: #8b5cf6;
-                color: white;
-                border: none;
-                border-radius: 6px;
-                font-size: 14px;
-                font-weight: 500;
-                cursor: pointer;
-                transition: background-color 0.2s;
-            "
-        >
-            Sync from Server
-        </button>
+        <!-- Divider - Vertical on desktop, horizontal on mobile -->
+        <div class="border-t md:border-t-0 md:border-l border-gray-200 md:h-auto md:min-h-[100px]"></div>
+
+        <!-- Buttons Section - Row on desktop, Column on mobile -->
+        <div class="flex flex-col md:flex-row gap-3 md:flex-1 md:justify-end md:items-center">
+            <button 
+                id="refresh-btn-{{ map_id }}" 
+                class="refresh-btn px-4 py-2 bg-blue-600 text-white border-none rounded-md text-sm font-medium cursor-pointer transition-colors hover:bg-blue-700 disabled:bg-gray-400 disabled:cursor-wait whitespace-nowrap"
+            >
+                Refresh
+            </button>
+            <button 
+                id="update-config-btn-{{ map_id }}" 
+                class="update-config-btn px-4 py-2 bg-green-600 text-white border-none rounded-md text-sm font-medium cursor-pointer transition-colors hover:bg-green-700 disabled:bg-gray-400 disabled:cursor-wait whitespace-nowrap"
+            >
+                Update Config
+            </button>
+            <button 
+                id="sync-btn-{{ map_id }}" 
+                class="sync-btn px-4 py-2 bg-purple-600 text-white border-none rounded-md text-sm font-medium cursor-pointer transition-colors hover:bg-purple-700 disabled:bg-gray-400 disabled:cursor-wait whitespace-nowrap"
+            >
+                Sync from Server
+            </button>
+        </div>
     </div>
 </div>
 

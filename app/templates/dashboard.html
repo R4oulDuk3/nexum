@@ -25,7 +25,19 @@
 
     <!-- Map Container -->
     <div class="bg-white shadow rounded-lg p-4">
+        <!-- Status Bar -->
+        <div id="status-bar" class="mb-4 p-3 bg-gray-50 rounded-lg border border-gray-200">
+            <div id="status-bar-content" class="flex flex-wrap items-center gap-4 md:gap-6">
+                <!-- Status items will be dynamically inserted here -->
+                <div class="text-sm text-gray-500">Loading...</div>
+            </div>
+        </div>
+        
         <div id="dashboard-map" style="position: relative; width: 100%; height: calc(100vh - 200px); min-height: 600px;">
+        </div>
+        
+        <!-- Map Controls - Below Map -->
+        <div class="mt-4">
             {% set map_id = 'default' %}
             {% include 'components/map_control.html' %}
         </div>
@@ -46,23 +58,76 @@
         const { initMap } = await import("{{ url_for('static', filename='maplibre-map.js') }}");
         const { initMapControl } = await import("{{ url_for('static', filename='map-control.js') }}");
         const { refreshMapMarkers } = await import("{{ url_for('static', filename='maplibre-map.js') }}");
+        const { getLocationStats } = await import("{{ url_for('static', filename='location-reader.js') }}");
+        
+        // Update status bar with entity counts
+        async function updateStatusBar() {
+            try {
+                const stats = await getLocationStats();
+                const statusBar = document.getElementById('status-bar');
+                const counts = stats.by_entity_type || {};
+                
+                // Entity types with their display names and icons
+                const entityTypes = [
+                    { type: 'responder', label: 'Responder', icon: '/assets/images/responder.png' },
+                    { type: 'civilian', label: 'Civilian', icon: '/assets/images/civilian.png' },
+                    { type: 'incident', label: 'Incident', icon: '/assets/images/incident.png' },
+                    { type: 'resource', label: 'Resource', icon: '/assets/images/resource.png' },
+                    { type: 'hazard', label: 'Hazard', icon: '/assets/images/hazard.png' }
+                ];
+                
+                // Build status bar HTML
+                const items = entityTypes.map(entity => {
+                    const count = counts[entity.type] || 0;
+                    return `
+                        <div class="flex items-center gap-2">
+                            <img src="${entity.icon}" alt="${entity.label}" class="w-5 h-5 object-contain" />
+                            <span class="font-medium text-gray-900">${entity.label}</span>
+                            <span class="text-gray-600">${count}</span>
+                        </div>
+                    `;
+                }).join('');
+                
+                const statusBarContent = document.getElementById('status-bar-content');
+                if (statusBarContent) {
+                    statusBarContent.innerHTML = items || '<div class="text-sm text-gray-500">No locations found</div>';
+                }
+                
+            } catch (error) {
+                console.error('Error updating status bar:', error);
+                const statusBarContent = document.getElementById('status-bar-content');
+                if (statusBarContent) {
+                    statusBarContent.innerHTML = '<div class="text-sm text-red-500">Error loading status</div>';
+                }
+            }
+        }
         
         try {
+            // Initial status bar update
+            await updateStatusBar();
+            
             // Initialize map with mapId
             const mapInstance = await initMap({
                 containerId: 'dashboard-map',
                 showControls: true,
-                mapId: 'dashboard-map'
+                mapId: 'default'
             });
             
-            // Wait for map to load
-           
-            console.log('Map loaded, initializing map controls...');
-            // Initialize map control (component already rendered in template)
-            await initMapControl('default', mapInstance);
+            // Make updateStatusBar globally accessible so map control can call it
+            window.updateStatusBar = updateStatusBar;
             
-            // Initial refresh
-            await refreshMapMarkers(mapInstance, 'default');
+            // Wait for map to load
+            mapInstance.once('load', async () => {
+                console.log('Map loaded, initializing map controls...');
+                // Initialize map control (component already rendered in template)
+                await initMapControl('default', mapInstance);
+                
+                // Initial refresh
+                await refreshMapMarkers(mapInstance, 'default');
+                
+                // Update status bar after refresh
+                await updateStatusBar();
+            });
            
             
         } catch (error) {
