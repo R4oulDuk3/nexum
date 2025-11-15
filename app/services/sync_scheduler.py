@@ -6,25 +6,32 @@ import threading
 import time
 import os
 from datetime import datetime
-from services.sync_service import get_sync_service
+
+# Optional import for requests (only needed when making HTTP calls)
+try:
+    import requests
+    REQUESTS_AVAILABLE = True
+except ImportError:
+    REQUESTS_AVAILABLE = False
 
 
 class SyncScheduler:
     """Background scheduler that periodically triggers mesh node synchronization"""
     
-    def __init__(self, interval_seconds: int = 10, enabled: bool = True):
+    def __init__(self, interval_seconds: int = 10, enabled: bool = True, api_url: str = 'http://localhost:5000'):
         """
         Initialize the sync scheduler.
         
         Args:
             interval_seconds: How often to trigger sync (default: 10 seconds)
             enabled: Whether the scheduler is enabled (default: True)
+            api_url: Base URL for the API (default: http://localhost:5000)
         """
         self.interval_seconds = interval_seconds
         self.enabled = enabled
+        self.api_url = api_url.rstrip('/')  # Remove trailing slash if present
         self._stop_event = threading.Event()
         self._thread = None
-        self._sync_service = get_sync_service()
         self._last_sync_time = None
         self._sync_count = 0
         
@@ -57,6 +64,11 @@ class SyncScheduler:
         """Main loop that runs in background thread"""
         print(f"SyncScheduler: Background sync thread started")
         
+        if not REQUESTS_AVAILABLE:
+            print(f"SyncScheduler: ERROR - 'requests' library not available!")
+            print(f"SyncScheduler: Install it with: pip install requests")
+            return
+        
         # Wait a bit on startup before first sync
         time.sleep(2)
         
@@ -67,28 +79,50 @@ class SyncScheduler:
                 print(f"SyncScheduler: Time: {datetime.now().isoformat()}")
                 print(f"{'='*60}")
                 
-                # Trigger sync using test_pull_all_peers (which now updates sync_log)
-                # This uses sync_log for incremental sync
-                results = self._sync_service.test_pull_all_peers(
-                    since_timestamp=None,  # Use sync_log timestamps per peer
-                    use_sync_log=True
-                )
+                # Call the /api/sync/test endpoint via HTTP
+                # This uses sync_log for incremental sync (use_sync_log=True by default)
+                sync_url = f"{self.api_url}/api/sync/test"
+                print(f"SyncScheduler: Calling {sync_url}...")
                 
-                self._last_sync_time = datetime.now()
-                self._sync_count += 1
-                
-                print(f"\nSyncScheduler: Sync completed")
-                print(f"  Peers found: {results.get('peers_found', 0)}")
-                print(f"  Peers attempted: {results.get('peers_attempted', 0)}")
-                print(f"  Reports pulled: {results.get('total_reports_pulled', 0)}")
-                print(f"  Reports saved: {results.get('total_reports_saved', 0)}")
-                print(f"  Reports skipped: {results.get('total_reports_skipped', 0)}")
-                print(f"  Errors: {len(results.get('errors', []))}")
-                
-                if results.get('errors'):
-                    print(f"SyncScheduler: Errors encountered:")
-                    for error in results.get('errors', []):
-                        print(f"  - {error}")
+                try:
+                    response = requests.get(
+                        sync_url,
+                        params={
+                            'use_sync_log': 'true'  # Use incremental sync via sync_log
+                        },
+                        timeout=30  # 30 second timeout for sync operation
+                    )
+                    
+                    response.raise_for_status()
+                    results = response.json()
+                    
+                    if results.get('status') != 'success':
+                        error_msg = results.get('message', 'Unknown error')
+                        print(f"SyncScheduler: Sync failed: {error_msg}")
+                        print(f"SyncScheduler: Response: {results}")
+                    else:
+                        self._last_sync_time = datetime.now()
+                        self._sync_count += 1
+                        
+                        print(f"\nSyncScheduler: Sync completed successfully")
+                        print(f"  Errors: {len(results.get('errors', []))}")
+                        
+                        if results.get('errors'):
+                            print(f"SyncScheduler: Errors encountered:")
+                            for error in results.get('errors', []):
+                                print(f"  - {error}")
+                            
+                        if results.get('messages'):
+                            print(f"SyncScheduler: Messages:")
+                            for msg in results.get('messages', []):
+                                print(f"  - {msg}")
+                        
+                except requests.exceptions.RequestException as e:
+                    print(f"SyncScheduler: ERROR calling sync endpoint: {type(e).__name__}: {e}")
+                    print(f"SyncScheduler: URL was: {sync_url}")
+                    if hasattr(e, 'response') and e.response is not None:
+                        print(f"SyncScheduler: Response status: {e.response.status_code}")
+                        print(f"SyncScheduler: Response body: {e.response.text[:200]}")
                         
                 print(f"{'='*60}\n")
                 
@@ -128,7 +162,9 @@ def get_sync_scheduler() -> SyncScheduler:
         interval = int(os.environ.get('SYNC_INTERVAL_SECONDS', '10'))
         # Get enabled flag from environment variable (default: True)
         enabled = os.environ.get('SYNC_ENABLED', 'true').lower() in ('true', '1', 'yes')
+        # Get API URL from environment variable or use default (localhost:5000)
+        api_url = os.environ.get('SYNC_API_URL', 'http://localhost:5000')
         
-        _scheduler = SyncScheduler(interval_seconds=interval, enabled=enabled)
+        _scheduler = SyncScheduler(interval_seconds=interval, enabled=enabled, api_url=api_url)
     return _scheduler
 
