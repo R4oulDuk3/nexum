@@ -224,6 +224,62 @@ class SyncService:
         except Exception as e:
             print(f"SyncService: Error updating sync time for {peer_node_id}: {e}")
     
+    def log_incoming_sync_request(self, peer_ip: str, peer_node_id: Optional[str] = None):
+        """
+        Log when a peer pulls data from us (incoming sync request).
+        If we don't know the peer's node_id, we'll try to find it from IP or create a placeholder entry.
+        
+        Args:
+            peer_ip: IP address of the peer making the request
+            peer_node_id: Optional node ID (MAC address) of the peer
+        """
+        try:
+            # If we don't have node_id, try to find it from peers list or use IP as identifier
+            if peer_node_id is None:
+                # Try to find node_id from known peers by IP
+                peers = self.get_all_peers()
+                for mac, ip in peers.items():
+                    if ip == peer_ip:
+                        peer_node_id = mac
+                        break
+                
+                # If still not found, use IP as temporary identifier
+                # (Note: sync_log uses peer_node_id as primary key, so this won't work perfectly)
+                # For now, we'll just log it if we can find a matching peer
+                if peer_node_id is None:
+                    print(f"SyncService: Incoming sync request from {peer_ip} - peer not in known peers list, skipping log")
+                    return
+            
+            now_ms = int(datetime.now(timezone.utc).timestamp() * 1000)
+            conn = sqlite3.connect(self.db_path)
+            cursor = conn.cursor()
+            
+            # Check if entry exists
+            cursor.execute('SELECT peer_node_id FROM sync_log WHERE peer_node_id = ?', (peer_node_id,))
+            exists = cursor.fetchone()
+            
+            if exists:
+                # Update the entry (update IP if changed, but don't update last_sync_at)
+                # The last_sync_at in this table tracks when WE synced with THEM, not when they sync with us
+                # But we can still log the IP
+                cursor.execute('''
+                    UPDATE sync_log 
+                    SET last_known_ip = ?
+                    WHERE peer_node_id = ?
+                ''', (peer_ip, peer_node_id))
+            else:
+                # Create new entry with last_sync_at = 0 since we haven't synced with them yet
+                cursor.execute('''
+                    INSERT INTO sync_log (peer_node_id, last_known_ip, last_sync_at)
+                    VALUES (?, ?, ?)
+                ''', (peer_node_id, peer_ip, 0))
+            
+            conn.commit()
+            conn.close()
+            print(f"SyncService: Logged incoming sync request from peer {peer_node_id} ({peer_ip})")
+        except Exception as e:
+            print(f"SyncService: Error logging incoming sync request from {peer_ip}: {e}")
+    
     def _extract_connection_error_type(self, error: Exception) -> str:
         """
         Extract a more specific error type from connection errors.
@@ -667,6 +723,21 @@ class SyncService:
                 if data_list or status_msg.startswith("Pulled"):
                     # Save the location reports to database
                     if data_list:
+                        # Print pulled data for testing
+                        print(f"\nTest: Data pulled from {peer_mac} ({peer_ip}):")
+                        print(f"  Number of reports: {len(data_list)}")
+                        for i, report in enumerate(data_list, 1):
+                            print(f"  Report {i}:")
+                            print(f"    ID: {report.get('id')}")
+                            print(f"    Entity Type: {report.get('entity_type')}")
+                            print(f"    Entity ID: {report.get('entity_id')}")
+                            print(f"    Node ID: {report.get('node_id')}")
+                            print(f"    Position: lat={report.get('position', {}).get('lat')}, lon={report.get('position', {}).get('lon')}")
+                            print(f"    Created At: {report.get('created_at')}")
+                            if report.get('metadata'):
+                                print(f"    Metadata: {report.get('metadata')}")
+                        print()  # Empty line for readability
+                        
                         saved_count, skipped_count = self.save_location_reports(data_list)
                         results["total_reports_pulled"] += len(data_list)
                         results["total_reports_saved"] += saved_count

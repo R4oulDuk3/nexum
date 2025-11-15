@@ -224,6 +224,9 @@ def get_latest_locations():
         entity_type = request.args.get('type')
         limit = int(request.args.get('limit', 100))
         
+        # Print all database tables for debugging (useful for testing)
+        location_service.print_all_database_tables()
+        
         entity_type_filter = EntityType(entity_type) if entity_type else None
         reports = location_service.get_latest_locations(entity_type_filter, limit)
         

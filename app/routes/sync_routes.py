@@ -83,6 +83,12 @@ def get_sync_data():
     try:
         since = request.args.get('since', type=int, default=0)
         
+        # Get peer IP from request
+        peer_ip = request.remote_addr
+        
+        # Log incoming sync request (when peer pulls data from us)
+        sync_service.log_incoming_sync_request(peer_ip)
+        
         # Get data from sync service
         data = sync_service.get_own_data_since(since)
         
