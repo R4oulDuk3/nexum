@@ -7,6 +7,7 @@ import json
 import platform
 import uuid
 import sqlite3
+import re
 from typing import List, Dict, Any, Optional
 from datetime import datetime, timezone
 from pathlib import Path
@@ -49,6 +50,7 @@ class SyncService:
         """
         peers = {}
         my_node_id = self.get_my_node_id()
+        print(f"SyncService: get_all_peers() - My node ID: {my_node_id}")
         
         # Mock data for local testing on Windows
         if platform.system() == "Windows":
@@ -59,37 +61,88 @@ class SyncService:
             }
         
         try:
-            # Run `batctl o -f json` to get the list of mesh originators (nodes)
+            print("SyncService: Running 'sudo batctl o' to get mesh originators...")
+            # Run `batctl o` to get the list of mesh originators (nodes)
+            # Note: `-f json` is not supported in all versions, so we parse text output
             result = subprocess.run(
-                ['sudo', 'batctl', 'o', '-f', 'json'],
+                ['sudo', 'batctl', 'o'],
                 capture_output=True, text=True, timeout=5, check=True
             )
             
-            # The output is a stream of JSON objects, one per line
-            for line in result.stdout.strip().split('\n'):
+            print(f"SyncService: batctl stdout length: {len(result.stdout)} chars")
+            print(f"SyncService: batctl stderr: {result.stderr if result.stderr else '(empty)'}")
+            
+            if not result.stdout.strip():
+                print("SyncService: batctl returned empty output")
+                return {}
+            
+            # Parse text output - each line contains originator info
+            # Format is typically: "Originator      last-seen" or MAC addresses in lines
+            lines = result.stdout.strip().split('\n')
+            print(f"SyncService: Parsing {len(lines)} lines from batctl output")
+            
+            # Regular expression to match MAC addresses (xx:xx:xx:xx:xx:xx)
+            mac_pattern = re.compile(r'([0-9a-fA-F]{2}[:-]){5}([0-9a-fA-F]{2})')
+            
+            for line_num, line in enumerate(lines, 1):
                 if not line.strip():
                     continue
-                try:
-                    data = json.loads(line)
-                    # The 'originator' is the node's MAC address
-                    peer_mac = data.get("originator")
-                    if peer_mac and peer_mac != my_node_id:
+                
+                print(f"SyncService: Line {line_num}: {line[:80]}")  # Print first 80 chars
+                
+                # Skip header lines
+                if 'Originator' in line and 'last-seen' in line:
+                    print(f"SyncService: Skipping header line")
+                    continue
+                if line.startswith('[B.A.T.M.A.N.'):
+                    print(f"SyncService: Skipping B.A.T.M.A.N. version line")
+                    continue
+                
+                # Find MAC address in the line
+                mac_matches = mac_pattern.findall(line)
+                if mac_matches:
+                    # Extract the full MAC address
+                    # mac_pattern.findall returns tuples, we need to reconstruct
+                    mac_match = mac_pattern.search(line)
+                    if mac_match:
+                        peer_mac = mac_match.group(0).replace('-', ':')  # Normalize to colons
+                        peer_mac = peer_mac.lower()  # Normalize to lowercase
+                        
+                        print(f"SyncService: Found MAC: {peer_mac}")
+                        
+                        # Skip if it's our own node ID
+                        if peer_mac == my_node_id:
+                            print(f"SyncService: Skipping own node ID: {peer_mac}")
+                            continue
+                        
+                        # Calculate IP from MAC
                         peer_ip = self._calculate_ip_from_mac(peer_mac)
                         if peer_ip:
                             peers[peer_mac] = peer_ip
-                except json.JSONDecodeError:
-                    print(f"SyncService: Warning: Could not parse batctl line: {line}")
+                            print(f"SyncService: Added peer {peer_mac} -> {peer_ip}")
+                        else:
+                            print(f"SyncService: Failed to calculate IP for {peer_mac}")
+                    else:
+                        print(f"SyncService: Could not extract MAC from line")
+                else:
+                    print(f"SyncService: No MAC address found in line")
                     
-        except FileNotFoundError:
-            print("SyncService: Error: 'sudo' or 'batctl' command not found.")
+        except FileNotFoundError as e:
+            print(f"SyncService: Error: 'sudo' or 'batctl' command not found: {e}")
             return {}
         except subprocess.CalledProcessError as e:
-            print(f"SyncService: Error running batctl: {e.stderr}")
+            print(f"SyncService: Error running batctl:")
+            print(f"  Return code: {e.returncode}")
+            print(f"  stdout: {e.stdout}")
+            print(f"  stderr: {e.stderr}")
             return {}
         except Exception as e:
-            print(f"SyncService: Error processing batctl output: {e}")
+            print(f"SyncService: Unexpected error processing batctl output: {type(e).__name__}: {e}")
+            import traceback
+            traceback.print_exc()
             return {}
-            
+        
+        print(f"SyncService: Found {len(peers)} peers total: {list(peers.keys())}")
         return peers
     
     def _calculate_ip_from_mac(self, mac: str) -> Optional[str]:
@@ -98,8 +151,12 @@ class SyncService:
         using the exact logic from setup-mesh.sh.
         """
         try:
+            print(f"SyncService: Calculating IP for MAC: {mac}")
             parts = mac.split(':')
+            print(f"SyncService: MAC parts: {parts} (count: {len(parts)})")
+            
             if len(parts) != 6:
+                print(f"SyncService: Invalid MAC format - expected 6 parts, got {len(parts)}")
                 return None
             
             # This is the logic from setup-mesh.sh:
@@ -108,9 +165,13 @@ class SyncService:
             o3 = int(parts[4], 16)
             o4 = int(parts[5], 16)
             
-            return f"{self.ip_range_base}.{o3}.{o4}"
+            ip = f"{self.ip_range_base}.{o3}.{o4}"
+            print(f"SyncService: Calculated IP: {ip} (from octets {parts[4]}={o3}, {parts[5]}={o4})")
+            return ip
         except Exception as e:
-            print(f"SyncService: Error calculating IP for {mac}: {e}")
+            print(f"SyncService: Error calculating IP for {mac}: {type(e).__name__}: {e}")
+            import traceback
+            traceback.print_exc()
             return None
     
     def get_last_sync_time(self, peer_node_id: str) -> int:
