@@ -1189,12 +1189,40 @@ class SyncService:
                         results["messages"].append(msg)
                         print(f"Test: ✓ Successfully pulled and saved data from {peer_mac}")
                         print(f"      {msg}")
-                        print(f"      NOTE: test_pull_all_peers() does NOT update sync_log (by design)")
-                        print(f"      To update sync_log, use POST /api/sync endpoint instead")
                     else:
                         results["messages"].append(f"Peer {peer_mac} ({peer_ip}): {status_msg}")
                         print(f"Test: ✓ Successfully pulled from {peer_mac} (no new data)")
-                        print(f"      NOTE: test_pull_all_peers() does NOT update sync_log (by design)")
+                    
+                    # Update sync_log since pull was successful (even if no new data)
+                    print(f"\nTest: ============================================================")
+                    print(f"Test: Updating sync_log for {peer_mac} ({peer_ip})...")
+                    print(f"Test: ============================================================")
+                    
+                    # Get current timestamp BEFORE update to compare
+                    before_update = self.get_last_sync_time(peer_mac)
+                    print(f"Test: Current timestamp BEFORE update: {before_update}")
+                    
+                    # Call update function
+                    print(f"Test: Calling update_last_sync_time('{peer_mac}', '{peer_ip}')...")
+                    self.update_last_sync_time(peer_mac, peer_ip)
+                    print(f"Test: Returned from update_last_sync_time()")
+                    
+                    # Verify sync_log update by querying IMMEDIATELY after update
+                    print(f"\nTest: Verifying sync_log update...")
+                    new_sync_time = self.get_last_sync_time(peer_mac)
+                    print(f"Test: Timestamp AFTER update: {new_sync_time}")
+                    print(f"Test: Timestamp BEFORE update: {before_update}")
+                    
+                    if new_sync_time > 0 and new_sync_time != before_update:
+                        new_readable = datetime.fromtimestamp(new_sync_time / 1000, tz=timezone.utc).isoformat()
+                        print(f"Test: ✓✓✓ SUCCESS: Sync_log updated from {before_update} to {new_sync_time}")
+                        print(f"Test:     Readable: {new_readable}")
+                    elif new_sync_time == before_update:
+                        print(f"Test: ✗ ERROR: Timestamp did NOT change! Still {new_sync_time}")
+                        print(f"Test:     This means update_last_sync_time() did not update the timestamp")
+                    else:
+                        print(f"Test: ✗ WARNING: Sync_log update may have failed (timestamp is 0)")
+                    print(f"Test: ============================================================\n")
                 else:
                     error_msg = f"Peer {peer_mac} ({peer_ip}): {status_msg}"
                     results["errors"].append(error_msg)
