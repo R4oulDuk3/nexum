@@ -10,8 +10,18 @@ from flasgger import Swagger
 from marshmallow import ValidationError
 import os
 import sqlite3
+import socket
+import platform
+import subprocess
 from datetime import datetime
 from pathlib import Path
+
+# Try to import netifaces, fallback to subprocess if not available
+try:
+    import netifaces
+    NETIFACES_AVAILABLE = True
+except ImportError:
+    NETIFACES_AVAILABLE = False
 
 # Initialize Flask app
 # Configure static files to be served from 'assets' directory
@@ -133,6 +143,126 @@ def get_db():
     conn = sqlite3.connect(app.config['DATABASE'])
     conn.row_factory = sqlite3.Row
     return conn
+
+
+def get_interface_ip(interface_name):
+    """Get the IPv4 address of a network interface"""
+    if NETIFACES_AVAILABLE:
+        try:
+            if interface_name in netifaces.interfaces():
+                addrs = netifaces.ifaddresses(interface_name)
+                if netifaces.AF_INET in addrs:
+                    ip_info = addrs[netifaces.AF_INET][0]
+                    return ip_info.get('addr')
+        except Exception:
+            pass
+    else:
+        # Fallback: use ip command
+        try:
+            result = subprocess.run(
+                ['ip', 'addr', 'show', interface_name],
+                capture_output=True,
+                text=True,
+                timeout=2
+            )
+            if result.returncode == 0:
+                for line in result.stdout.split('\n'):
+                    if 'inet ' in line and '127.' not in line:
+                        # Extract IP from line like "    inet 192.168.1.1/24 ..."
+                        parts = line.strip().split()
+                        if len(parts) >= 2:
+                            ip = parts[1].split('/')[0]
+                            return ip
+        except Exception:
+            pass
+    return None
+
+
+def get_access_point_ip():
+    """Get the IP address of the access point interface (wlan1 or bridge)"""
+    # Try to find the AP IP address in this order:
+    # 1. br-ap (bridge interface for AP)
+    # 2. wlan1 (AP interface)
+    # 3. Any interface starting with 'ap' or 'br'
+    
+    interfaces_to_check = ['br-ap', 'br0', 'wlan1', 'wlan0', 'bat0']
+    
+    for iface in interfaces_to_check:
+        ip = get_interface_ip(iface)
+        if ip:
+            return ip, iface
+    
+    # Check all interfaces for bridge or AP-like names
+    if NETIFACES_AVAILABLE:
+        try:
+            for iface in netifaces.interfaces():
+                if iface.startswith(('br-', 'ap', 'wlan')):
+                    ip = get_interface_ip(iface)
+                    if ip:
+                        return ip, iface
+        except Exception:
+            pass
+    else:
+        # Fallback: use ip command to list all interfaces
+        try:
+            result = subprocess.run(
+                ['ip', 'link', 'show'],
+                capture_output=True,
+                text=True,
+                timeout=2
+            )
+            if result.returncode == 0:
+                for line in result.stdout.split('\n'):
+                    if ': ' in line and (line.startswith(' ') or line.startswith('2:')):
+                        # Extract interface name from line like "2: wlan1: ..."
+                        parts = line.split(':')
+                        if len(parts) >= 2:
+                            iface = parts[1].strip()
+                            if iface.startswith(('br-', 'ap', 'wlan')):
+                                ip = get_interface_ip(iface)
+                                if ip:
+                                    return ip, iface
+        except Exception:
+            pass
+    
+    # Fallback: get the first non-loopback IPv4 address
+    if NETIFACES_AVAILABLE:
+        try:
+            for iface in netifaces.interfaces():
+                if iface == 'lo':
+                    continue
+                ip = get_interface_ip(iface)
+                if ip and not ip.startswith('127.'):
+                    return ip, iface
+        except Exception:
+            pass
+    else:
+        # Use ip addr show to find first non-loopback IP
+        try:
+            result = subprocess.run(
+                ['ip', 'addr', 'show'],
+                capture_output=True,
+                text=True,
+                timeout=2
+            )
+            if result.returncode == 0:
+                current_iface = None
+                for line in result.stdout.split('\n'):
+                    if ': ' in line and not line.startswith(' '):
+                        # Extract interface name
+                        parts = line.split(':')
+                        if len(parts) >= 2:
+                            current_iface = parts[1].strip().split('@')[0]
+                    elif 'inet ' in line and current_iface and '127.' not in line:
+                        parts = line.strip().split()
+                        if len(parts) >= 2:
+                            ip = parts[1].split('/')[0]
+                            if current_iface != 'lo':
+                                return ip, current_iface
+        except Exception:
+            pass
+    
+    return None, None
 
 
 def init_db():
@@ -259,6 +389,48 @@ def demo_data():
         conn.close()
 
 
+@app.route('/api/network')
+def network_info():
+    """
+    Get network information for accessing the app
+    ---
+    tags:
+      - health
+    responses:
+      200:
+        description: Network access information
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                access_point_ip:
+                  type: string
+                  nullable: true
+                  example: "169.254.1.1"
+                access_point_interface:
+                  type: string
+                  nullable: true
+                  example: "br-ap"
+                port:
+                  type: integer
+                  example: 5000
+                access_url:
+                  type: string
+                  nullable: true
+                  example: "http://169.254.1.1:5000"
+    """
+    ap_ip, ap_interface = get_access_point_ip()
+    port = int(os.environ.get('PORT', 5000))
+    
+    return jsonify({
+        'access_point_ip': ap_ip,
+        'access_point_interface': ap_interface,
+        'port': port,
+        'access_url': f'http://{ap_ip}:{port}' if ap_ip else None
+    })
+
+
 if __name__ == '__main__':
     # Initialize database on first run
     init_db()
@@ -269,6 +441,24 @@ if __name__ == '__main__':
     
     print(f"Starting Nexum Mesh Messaging on {host}:{port}")
     print(f"Database: {app.config['DATABASE']}")
+    
+    # Try to get the access point IP address for WiFi access
+    ap_ip, ap_interface = get_access_point_ip()
+    if ap_ip:
+        print(f"\n{'='*60}")
+        print(f"Network Access Information:")
+        print(f"  Interface: {ap_interface}")
+        print(f"  IP Address: {ap_ip}")
+        print(f"  Access from your phone: http://{ap_ip}:{port}")
+        print(f"  Local access: http://localhost:{port}")
+        print(f"{'='*60}\n")
+    else:
+        print(f"\n{'='*60}")
+        print(f"Network Access Information:")
+        print(f"  Could not detect access point IP address")
+        print(f"  Local access: http://localhost:{port}")
+        print(f"  To find your IP, run: ip addr show")
+        print(f"{'='*60}\n")
     
     app.run(host=host, port=port, debug=True)
 
