@@ -30,11 +30,11 @@
     <!-- Header -->
     <div class="mb-6">
         <h2 class="text-3xl font-bold text-gray-900">Mesh Network Dashboard</h2>
-        <p class="mt-2 text-sm text-gray-600">View and manage location data from mesh network nodes</p>
+        <p class="mt-2 text-sm text-gray-500">View and manage location data from mesh network nodes</p>
     </div>
 
     <!-- Map Container -->
-    <div class="bg-white shadow rounded-lg p-4 relative">
+    <div class="bg-white border border-gray-200 rounded-lg p-4 relative shadow-sm">
         <!-- Status Bar -->
         <div id="status-bar" class="mb-4 p-3 bg-gray-50 rounded-lg border border-gray-200">
             <div class="flex items-center justify-between gap-4">
@@ -46,7 +46,7 @@
                 <!-- Config Button -->
                 <button 
                     id="open-controls-btn" 
-                    class="flex-shrink-0 bg-blue-600 text-white p-2 rounded-lg shadow hover:bg-blue-700 transition-colors"
+                    class="flex-shrink-0 rounded-md bg-teal-600 px-4 py-2 text-sm font-medium text-white shadow-sm transition hover:bg-teal-700"
                     aria-label="Open map controls"
                 >
                     <svg class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
@@ -61,10 +61,10 @@
     </div>
     
     <!-- Bottom Drawer -->
-    <div id="map-controls-drawer" class="fixed inset-x-0 bottom-0 bg-white rounded-t-xl shadow-2xl transform translate-y-full transition-transform duration-300 ease-out z-50 max-h-[85vh] overflow-y-auto">
-        <div class="p-3">
+    <div id="map-controls-drawer" class="fixed inset-x-0 bottom-0 bg-white rounded-t-2xl shadow-2xl border-t border-gray-200 transform translate-y-full transition-transform duration-300 ease-out z-50 max-h-[85vh] overflow-y-auto">
+        <div class="p-4">
             <!-- Drawer Handle -->
-            <div class="flex justify-center mb-3">
+            <div class="flex justify-center mb-4">
                 <div class="w-12 h-1 bg-gray-300 rounded-full"></div>
             </div>
             
