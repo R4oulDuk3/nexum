@@ -138,21 +138,38 @@
         const { initMap } = await import("{{ url_for('static', filename='maplibre-map.js') }}");
         const { initMapControl } = await import("{{ url_for('static', filename='map-control.js') }}");
         const { refreshMapMarkers } = await import("{{ url_for('static', filename='maplibre-map.js') }}");
-        const { getLocationStats } = await import("{{ url_for('static', filename='location-reader.js') }}");
+        const { getLocationsGroupedByEntity } = await import("{{ url_for('static', filename='location-reader.js') }}");
+        const { getMapConfig } = await import("{{ url_for('static', filename='map-config.js') }}");
         const { deepSyncAllNodes } = await import("{{ url_for('static', filename='location-sync.js') }}");
         const dbModule = await import("{{ url_for('static', filename='location-sync-db.js') }}");
         const db = dbModule.default;
         console.log('[Dashboard] All modules imported successfully');
         
-        // Update status bar with entity counts
+        // Update status bar with entity counts using same filters as map
         async function updateStatusBar() {
             try {
-                const stats = await getLocationStats();
+                // Get map config to use same filters as map
+                const mapId = window.mapId || 'default';
+                const config = await getMapConfig(mapId);
+                
+                // Use same filters as refreshMapMarkers
+                const entityTypes = config ? (config.entity_types_to_show || []) : ['responder', 'civilian', 'incident', 'resource', 'hazard'];
+                const timeFromMinutes = config ? (config.time_from_minutes !== undefined ? config.time_from_minutes : -120) : -120;
+                const timeUntilMinutes = config ? (config.time_until_minutes !== undefined ? config.time_until_minutes : 0) : 0;
+                
+                // Get filtered locations using same method as map
+                const { latestLocations } = await getLocationsGroupedByEntity(entityTypes, timeFromMinutes, timeUntilMinutes);
+                
+                // Count by entity type from filtered locations
+                const counts = {};
+                latestLocations.forEach(loc => {
+                    counts[loc.entity_type] = (counts[loc.entity_type] || 0) + 1;
+                });
+                
                 const statusBar = document.getElementById('status-bar');
-                const counts = stats.by_entity_type || {};
                 
                 // Entity types with their display names and icons
-                const entityTypes = [
+                const entityTypeDisplay = [
                     { type: 'responder', label: 'Responder', icon: '/assets/images/responder.png' },
                     { type: 'civilian', label: 'Civilian', icon: '/assets/images/civilian.png' },
                     { type: 'incident', label: 'Incident', icon: '/assets/images/incident.png' },
@@ -160,17 +177,19 @@
                     { type: 'hazard', label: 'Hazard', icon: '/assets/images/hazard.png' }
                 ];
                 
-                // Build status bar HTML
-                const items = entityTypes.map(entity => {
-                    const count = counts[entity.type] || 0;
-                    return `
-                        <div class="flex items-center gap-2">
-                            <img src="${entity.icon}" alt="${entity.label}" class="w-5 h-5 object-contain" />
-                            <span class="hidden md:inline font-medium text-gray-900">${entity.label}</span>
-                            <span class="text-gray-600 font-medium">${count}</span>
-                        </div>
-                    `;
-                }).join('');
+                // Build status bar HTML - only show entity types that are enabled in config
+                const items = entityTypeDisplay
+                    .filter(entity => entityTypes.includes(entity.type))
+                    .map(entity => {
+                        const count = counts[entity.type] || 0;
+                        return `
+                            <div class="flex items-center gap-2">
+                                <img src="${entity.icon}" alt="${entity.label}" class="w-5 h-5 object-contain" />
+                                <span class="hidden md:inline font-medium text-gray-900">${entity.label}</span>
+                                <span class="text-gray-600 font-medium">${count}</span>
+                            </div>
+                        `;
+                    }).join('');
                 
                 const statusBarContent = document.getElementById('status-bar-content');
                 if (statusBarContent) {
