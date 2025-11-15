@@ -186,23 +186,41 @@ class SyncService:
             conn.row_factory = sqlite3.Row
             cursor = conn.cursor()
             
+            # First check if table exists
+            cursor.execute("SELECT name FROM sqlite_master WHERE type='table' AND name='sync_log'")
+            table_exists = cursor.fetchone()
+            
+            if not table_exists:
+                print(f"SyncService: WARNING - sync_log table does not exist!")
+                conn.close()
+                return 0
+            
+            # Query the sync_log table
             cursor.execute('SELECT last_sync_at, last_known_ip FROM sync_log WHERE peer_node_id = ?', (peer_node_id,))
             row = cursor.fetchone()
-            conn.close()
             
             if row:
                 last_sync_at = row['last_sync_at'] if row['last_sync_at'] else 0
                 last_ip = row['last_known_ip'] if row['last_known_ip'] else 'unknown'
-                # Only log in verbose mode or when debugging
-                # print(f"SyncService: Found sync_log entry for {peer_node_id}: last_sync_at={last_sync_at}, last_ip={last_ip}")
+                conn.close()
                 return last_sync_at
             else:
                 # No entry in sync_log yet
+                conn.close()
                 return 0
+        except sqlite3.Error as e:
+            print(f"SyncService: Database error getting last sync time for {peer_node_id}: {e}")
+            import traceback
+            traceback.print_exc()
+            if 'conn' in locals():
+                conn.close()
+            return 0  # Default to 0 on error
         except Exception as e:
             print(f"SyncService: Error getting last sync time for {peer_node_id}: {e}")
             import traceback
             traceback.print_exc()
+            if 'conn' in locals():
+                conn.close()
             return 0  # Default to 0 on error
     
     def update_last_sync_time(self, peer_node_id: str, peer_ip: str):
@@ -212,32 +230,106 @@ class SyncService:
         """
         try:
             now_ms = int(datetime.now(timezone.utc).timestamp() * 1000)
+            now_readable = datetime.fromtimestamp(now_ms / 1000, tz=timezone.utc).isoformat()
+            
+            print(f"\n{'='*60}")
+            print(f"SyncService: update_last_sync_time() - ENTRY")
+            print(f"{'='*60}")
+            print(f"  peer_node_id: '{peer_node_id}'")
+            print(f"  peer_ip: '{peer_ip}'")
+            print(f"  new_timestamp: {now_ms}")
+            print(f"  new_timestamp_readable: {now_readable}")
+            print(f"  db_path: {self.db_path}")
+            
             conn = sqlite3.connect(self.db_path)
             cursor = conn.cursor()
             
-            # Check if entry exists
-            cursor.execute('SELECT peer_node_id, last_sync_at FROM sync_log WHERE peer_node_id = ?', (peer_node_id,))
+            # Check if entry exists BEFORE update
+            cursor.execute('SELECT peer_node_id, last_known_ip, last_sync_at FROM sync_log WHERE peer_node_id = ?', (peer_node_id,))
             existing = cursor.fetchone()
             
             if existing:
-                old_timestamp = existing[1] if existing[1] else 0
+                old_timestamp = existing[2] if existing[2] else 0
+                old_ip = existing[1] if existing[1] else 'unknown'
+                old_readable = datetime.fromtimestamp(old_timestamp / 1000, tz=timezone.utc).isoformat() if old_timestamp > 0 else 'never'
+                
+                print(f"  Found existing entry:")
+                print(f"    old_timestamp: {old_timestamp}")
+                print(f"    old_timestamp_readable: {old_readable}")
+                print(f"    old_ip: {old_ip}")
+                
+                # Update the entry
                 cursor.execute('''
                     UPDATE sync_log 
                     SET last_sync_at = ?, last_known_ip = ?
                     WHERE peer_node_id = ?
                 ''', (now_ms, peer_ip, peer_node_id))
-                print(f"SyncService: Updated sync_log for {peer_node_id}: {old_timestamp} -> {now_ms} (IP: {peer_ip})")
+                
+                print(f"  Executing UPDATE...")
+                print(f"    UPDATE sync_log SET last_sync_at={now_ms}, last_known_ip='{peer_ip}' WHERE peer_node_id='{peer_node_id}'")
             else:
+                print(f"  No existing entry found, creating new entry")
+                
+                # Insert new entry
                 cursor.execute('''
                     INSERT INTO sync_log (peer_node_id, last_known_ip, last_sync_at)
                     VALUES (?, ?, ?)
                 ''', (peer_node_id, peer_ip, now_ms))
-                print(f"SyncService: Created sync_log entry for {peer_node_id}: last_sync_at={now_ms}, IP={peer_ip}")
+                
+                print(f"  Executing INSERT...")
+                print(f"    INSERT INTO sync_log (peer_node_id, last_known_ip, last_sync_at)")
+                print(f"    VALUES ('{peer_node_id}', '{peer_ip}', {now_ms})")
             
+            # Commit the transaction
             conn.commit()
+            print(f"  Transaction committed")
+            
+            # Verify the update/insert by querying the table
+            cursor.execute('SELECT peer_node_id, last_known_ip, last_sync_at FROM sync_log WHERE peer_node_id = ?', (peer_node_id,))
+            verify_row = cursor.fetchone()
+            
+            if verify_row:
+                verify_timestamp = verify_row[2] if verify_row[2] else 0
+                verify_ip = verify_row[1] if verify_row[1] else 'unknown'
+                verify_readable = datetime.fromtimestamp(verify_timestamp / 1000, tz=timezone.utc).isoformat() if verify_timestamp > 0 else 'never'
+                
+                print(f"  ✓ VERIFICATION - Entry in sync_log table:")
+                print(f"    peer_node_id: '{verify_row[0]}'")
+                print(f"    last_known_ip: '{verify_ip}'")
+                print(f"    last_sync_at: {verify_timestamp}")
+                print(f"    last_sync_at_readable: {verify_readable}")
+                
+                if verify_timestamp == now_ms and verify_ip == peer_ip:
+                    print(f"  ✓ VERIFICATION PASSED - Data matches!")
+                else:
+                    print(f"  ✗ VERIFICATION FAILED - Data mismatch!")
+                    print(f"    Expected timestamp: {now_ms}, Got: {verify_timestamp}")
+                    print(f"    Expected IP: {peer_ip}, Got: {verify_ip}")
+            else:
+                print(f"  ✗ VERIFICATION FAILED - Entry not found in table after insert/update!")
+            
+            # Also show all entries in sync_log for debugging
+            cursor.execute('SELECT COUNT(*) FROM sync_log')
+            total_count = cursor.fetchone()[0]
+            print(f"  Total entries in sync_log table: {total_count}")
+            
+            if total_count > 0:
+                cursor.execute('SELECT peer_node_id, last_known_ip, last_sync_at FROM sync_log ORDER BY last_sync_at DESC')
+                all_rows = cursor.fetchall()
+                print(f"  All entries in sync_log:")
+                for idx, row in enumerate(all_rows, 1):
+                    row_timestamp = row[2] if row[2] else 0
+                    row_readable = datetime.fromtimestamp(row_timestamp / 1000, tz=timezone.utc).isoformat() if row_timestamp > 0 else 'never'
+                    print(f"    {idx}. peer_node_id='{row[0]}', IP='{row[1]}', last_sync_at={row_timestamp} ({row_readable})")
+            
             conn.close()
+            print(f"{'='*60}\n")
+            
         except Exception as e:
-            print(f"SyncService: Error updating sync time for {peer_node_id}: {e}")
+            print(f"\n{'='*60}")
+            print(f"SyncService: ERROR updating sync time for {peer_node_id}")
+            print(f"  Error: {type(e).__name__}: {e}")
+            print(f"{'='*60}\n")
             import traceback
             traceback.print_exc()
     
@@ -667,6 +759,21 @@ class SyncService:
         
         print(f"SyncService: sync_with_all_peers() - Starting sync with {len(peers)} peers")
         
+        # Check sync_log table state before sync
+        try:
+            conn = sqlite3.connect(self.db_path)
+            cursor = conn.cursor()
+            cursor.execute('SELECT COUNT(*) FROM sync_log')
+            sync_log_count = cursor.fetchone()[0]
+            print(f"SyncService: sync_log table currently has {sync_log_count} entries")
+            if sync_log_count > 0:
+                cursor.execute('SELECT peer_node_id, last_known_ip, last_sync_at FROM sync_log')
+                for row in cursor.fetchall():
+                    print(f"  - {row[0]} ({row[1]}): last_sync_at={row[2]}")
+            conn.close()
+        except Exception as e:
+            print(f"SyncService: Error checking sync_log table: {e}")
+        
         for peer_mac, peer_ip in peers.items():
             try:
                 # Get last sync time for this peer from sync_log
@@ -699,12 +806,19 @@ class SyncService:
                         results["messages"].append(f"Peer {peer_mac} ({peer_ip}): {status_msg}")
                     
                     # Update sync time since pull was successful (even if no new data)
+                    print(f"\n  About to update sync_log for {peer_mac} ({peer_ip})...")
                     self.update_last_sync_time(peer_mac, peer_ip)
                     results["peers_synced"] += 1
                     
-                    # Log the sync_log update
+                    # Verify sync_log update by querying
                     new_sync_time = self.get_last_sync_time(peer_mac)
-                    print(f"  Updated sync_log for {peer_mac}: last_sync_at = {new_sync_time}")
+                    print(f"  Verification query: last_sync_at for {peer_mac} = {new_sync_time}")
+                    
+                    if new_sync_time > 0:
+                        new_readable = datetime.fromtimestamp(new_sync_time / 1000, tz=timezone.utc).isoformat()
+                        print(f"  ✓ Sync_log successfully updated: {new_sync_time} ({new_readable})")
+                    else:
+                        print(f"  ✗ WARNING: Sync_log update may have failed (timestamp is 0)")
                 else:
                     # Pull failed, add to errors
                     error_msg = f"Failed to pull from {peer_mac} ({peer_ip}): {status_msg}"
@@ -717,6 +831,42 @@ class SyncService:
                 results["errors"].append(error_msg)
                 results["messages"].append(error_msg)
                 print(f"SyncService: {error_msg}")
+        
+        # Check sync_log table state AFTER sync
+        print(f"\n{'='*60}")
+        print(f"SyncService: sync_with_all_peers() - FINAL STATE OF sync_log TABLE")
+        print(f"{'='*60}")
+        try:
+            conn = sqlite3.connect(self.db_path)
+            cursor = conn.cursor()
+            
+            # Check if table exists
+            cursor.execute("SELECT name FROM sqlite_master WHERE type='table' AND name='sync_log'")
+            table_exists = cursor.fetchone()
+            
+            if not table_exists:
+                print(f"  ✗ WARNING: sync_log table does not exist!")
+            else:
+                cursor.execute('SELECT COUNT(*) FROM sync_log')
+                sync_log_count = cursor.fetchone()[0]
+                print(f"  sync_log table has {sync_log_count} entries")
+                
+                if sync_log_count > 0:
+                    cursor.execute('SELECT peer_node_id, last_known_ip, last_sync_at FROM sync_log ORDER BY last_sync_at DESC')
+                    for idx, row in enumerate(cursor.fetchall(), 1):
+                        row_timestamp = row[2] if row[2] else 0
+                        row_readable = datetime.fromtimestamp(row_timestamp / 1000, tz=timezone.utc).isoformat() if row_timestamp > 0 else 'never'
+                        print(f"    {idx}. peer_node_id='{row[0]}', IP='{row[1]}', last_sync_at={row_timestamp} ({row_readable})")
+                else:
+                    print(f"  ⚠ WARNING: sync_log table is empty!")
+            
+            conn.close()
+        except Exception as e:
+            print(f"  ✗ ERROR checking sync_log table: {e}")
+            import traceback
+            traceback.print_exc()
+        
+        print(f"{'='*60}\n")
         
         return results
     
@@ -843,6 +993,15 @@ class SyncService:
             conn.row_factory = sqlite3.Row
             cursor = conn.cursor()
             
+            # First verify table exists
+            cursor.execute("SELECT name FROM sqlite_master WHERE type='table' AND name='sync_log'")
+            table_exists = cursor.fetchone()
+            
+            if not table_exists:
+                print(f"SyncService: get_sync_log_status() - WARNING: sync_log table does not exist!")
+                conn.close()
+                return []
+            
             cursor.execute('''
                 SELECT peer_node_id, last_known_ip, last_sync_at
                 FROM sync_log
@@ -851,6 +1010,8 @@ class SyncService:
             
             rows = cursor.fetchall()
             conn.close()
+            
+            print(f"SyncService: get_sync_log_status() - Found {len(rows)} entries in sync_log")
             
             now_ms = int(datetime.now(timezone.utc).timestamp() * 1000)
             
