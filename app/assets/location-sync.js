@@ -52,19 +52,20 @@ export async function syncWithNode(nodeId) {
         // Get last sync time from Dexie
         const nodeSync = await db.node_sync.get(nodeId);
         const now = Date.now();
-        const oneMinuteAgo = now - 60000;
+        const threeHoursAgo = now - (3 * 60 * 60 * 1000); // 3 hours in milliseconds
         
         // Calculate time range
         let fromTimestamp;
-        if (nodeSync && (now - nodeSync.last_sync_time) < 60000) {
+        const threeHoursInMs = 3 * 60 * 60 * 1000; // 3 hours in milliseconds
+        if (nodeSync && (now - nodeSync.last_sync_time) < threeHoursInMs) {
             // Recent sync: get updates since last sync
             fromTimestamp = nodeSync.last_sync_time;
             const age = ((now - fromTimestamp) / 1000).toFixed(1);
             console.log(`[LocationSync] Node ${nodeId}: Using incremental sync (since ${age}s ago)`);
         } else {
-            // Stale or new: get last 1 minute only
-            fromTimestamp = oneMinuteAgo;
-            console.log(`[LocationSync] Node ${nodeId}: Using full sync (last 1 minute)`);
+            // Stale or new: get last 3 hours only
+            fromTimestamp = threeHoursAgo;
+            console.log(`[LocationSync] Node ${nodeId}: Using full sync (last 3 hours)`);
         }
         
         // Fetch data from node

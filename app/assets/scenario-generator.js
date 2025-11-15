@@ -10,11 +10,11 @@ import { generateRandomBerlinPosition, BERLIN_BOUNDS } from './location-utils.js
 import { deepSyncAllNodes } from './location-sync.js';
 
 /**
- * Disaster point at center of Berlin (Brandenburg Gate area)
+ * Disaster point near Templehof (Tempelhof Park/Airport area)
  */
 export const DISASTER_POINT = {
-    lat: 52.5200,
-    lon: 13.4050
+    lat: 52.4833,
+    lon: 13.3897
 };
 
 /**
@@ -539,7 +539,7 @@ function generateScenario(params) {
     
     console.log('[Scenario] Generating scenario...', params);
     
-    // Define disaster point at center of Berlin
+    // Define disaster point near Templehof
     const disasterPoint = DISASTER_POINT;
     console.log(`[Scenario] Disaster point: (${disasterPoint.lat}, ${disasterPoint.lon})`);
     
