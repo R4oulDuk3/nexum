@@ -502,9 +502,28 @@ function createMarkerElement(entityType, location, isUser = false) {
         icon.src = '/assets/images/usr.png';
         icon.alt = 'You';
     } else {
+        switch (entityType) {
+            case 'responder':
+                icon.src = '/assets/images/responder.png';
+                break;
+            case 'civilian':
+                icon.src = '/assets/images/civilian.png';
+                break;
+            case 'incident':
+                icon.src = '/assets/images/incident.png';
+                break;
+            case 'resource':
+                icon.src = '/assets/images/resource.png';
+                break;
+            case 'hazard':
+                icon.src = '/assets/images/hazard.png';
+                break;
+            default:
+                icon.src = '/assets/images/usr.png';
+                break;
+        }
         // Regular entity markers - use default marker for now
         // You can add specific icons later
-        icon.src = '/assets/images/usr.png'; // Fallback - use user icon as default
         icon.alt = entityType;
     }
     

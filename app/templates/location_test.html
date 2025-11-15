@@ -44,15 +44,21 @@
                                 <input type="text" id="entityName" class="mt-1 block w-full rounded-md border-gray-300 shadow-sm p-2 border" placeholder="e.g., Medic Team Alpha">
                             </div>
                             
-                            <div class="grid grid-cols-2 gap-4">
-                                <div>
-                                    <label class="block text-sm font-medium text-gray-700">Latitude</label>
-                                    <input type="number" step="0.000001" id="latitude" class="mt-1 block w-full rounded-md border-gray-300 shadow-sm p-2 border" value="52.5200">
+                            <div>
+                                <label class="block text-sm font-medium text-gray-700 mb-2">Position</label>
+                                <div class="grid grid-cols-2 gap-4">
+                                    <div>
+                                        <label class="block text-xs text-gray-600 mb-1">Latitude</label>
+                                        <input type="number" step="0.000001" id="latitude" class="block w-full rounded-md border-gray-300 shadow-sm p-2 border" value="52.5200">
+                                    </div>
+                                    <div>
+                                        <label class="block text-xs text-gray-600 mb-1">Longitude</label>
+                                        <input type="number" step="0.000001" id="longitude" class="block w-full rounded-md border-gray-300 shadow-sm p-2 border" value="13.4050">
+                                    </div>
                                 </div>
-                                <div>
-                                    <label class="block text-sm font-medium text-gray-700">Longitude</label>
-                                    <input type="number" step="0.000001" id="longitude" class="mt-1 block w-full rounded-md border-gray-300 shadow-sm p-2 border" value="13.4050">
-                                </div>
+                                <button type="button" onclick="fillRandomBerlinPosition()" class="mt-2 bg-purple-600 text-white py-1 px-3 rounded-md hover:bg-purple-700 text-sm">
+                                    Rand
+                                </button>
                             </div>
                             
                             <div>
@@ -323,8 +329,11 @@
             
             let position;
             
-            // For responders, use random Berlin location if not provided
-            if (entityType === 'responder' && (!latValue || !lonValue)) {
+            // For responders, use random Berlin location if not provided or using defaults
+            const isDefaultPosition = (latValue === '52.5200' && lonValue === '13.4050') || 
+                                     (latValue === '' || lonValue === '');
+            
+            if (entityType === 'responder' && isDefaultPosition) {
                 const { generateRandomBerlinPosition } = await import("{{ url_for('static', filename='location-utils.js') }}");
                 position = generateRandomBerlinPosition();
                 
@@ -450,6 +459,22 @@
                 });
             } else {
                 alert('Geolocation is not supported by your browser');
+            }
+        }
+
+        // Fill random Berlin position in latitude and longitude fields
+        async function fillRandomBerlinPosition() {
+            try {
+                const { generateRandomBerlinPosition } = await import("{{ url_for('static', filename='location-utils.js') }}");
+                const position = generateRandomBerlinPosition();
+                
+                document.getElementById('latitude').value = position.lat;
+                document.getElementById('longitude').value = position.lon;
+                
+                console.log('Filled random Berlin position:', position);
+            } catch (error) {
+                console.error('Error generating random Berlin position:', error);
+                alert('Error generating random position: ' + error.message);
             }
         }
 
