@@ -69,10 +69,17 @@ function getRandomPositionInRadius(center, minRadiusKm, maxRadiusKm) {
 /**
  * Generate curved path between start and end using Quadratic Bezier curve
  * Simulates realistic movement (walking speed ~5 km/h) with natural curves
+ * @param {Object} start - Start position {lat, lon}
+ * @param {Object} end - End position {lat, lon}
+ * @param {number} durationMinutes - Total duration in minutes
+ * @param {number} pingFrequencySeconds - How often to generate a position point (in seconds)
  */
-function generateCurvedPath(start, end, durationMinutes) {
+function generateCurvedPath(start, end, durationMinutes, pingFrequencySeconds = 10) {
     const positions = [];
-    const steps = Math.max(2, Math.floor(durationMinutes / 2)); // Update every 2 minutes
+    // Calculate number of steps based on ping frequency
+    // e.g., 30 minutes * 60 seconds / 10 seconds per ping = 180 points
+    const totalSeconds = durationMinutes * 60;
+    const steps = Math.max(2, Math.floor(totalSeconds / pingFrequencySeconds));
     
     // Calculate straight-line distance
     const totalDistance = distance(start.lat, start.lon, end.lat, end.lon);
@@ -102,9 +109,10 @@ function generateCurvedPath(start, end, durationMinutes) {
     const lineAngle = Math.atan2(dy, dx);
     const perpendicularAngle = lineAngle + Math.PI / 2;
     
-    // Control point offset: 30-70% of distance, perpendicular to line
-    const curvatureFactor = 0.3 + Math.random() * 0.4; // 30-70%
-    const curvatureDist = curvatureFactor * lineDist * 0.3; // Scale down for subtle curve
+    // Control point offset: 40-80% of distance, perpendicular to line
+    // Increased curvature for more pronounced curves
+    const curvatureFactor = 0.4 + Math.random() * 0.4; // 40-80%
+    const curvatureDist = curvatureFactor * lineDist * 0.5; // Increased from 0.3 to 0.5 for more curves
     
     // Convert curvature distance to lat/lon offset
     const offsetLat = (curvatureDist / 111) * Math.cos(perpendicularAngle);
@@ -129,10 +137,13 @@ function generateCurvedPath(start, end, durationMinutes) {
                     2 * oneMinusT * t * controlPoint.lon + 
                     t * t * adjustedEnd.lon;
         
+        // Calculate time offset based on ping frequency
+        const timeOffset = i * pingFrequencySeconds * 1000; // Convert to milliseconds
+        
         positions.push({ 
             lat, 
             lon, 
-            timeOffset: (durationMinutes * t) * 60000 
+            timeOffset: timeOffset
         });
     }
     
@@ -166,10 +177,13 @@ function generateCurvedPath(start, end, durationMinutes) {
                         2 * oneMinusT * t * adjustedControlPoint.lon + 
                         t * t * adjustedEnd.lon;
             
+            // Calculate time offset based on ping frequency
+            const timeOffset = i * pingFrequencySeconds * 1000; // Convert to milliseconds
+            
             positions.push({ 
                 lat, 
                 lon, 
-                timeOffset: (durationMinutes * t) * 60000 
+                timeOffset: timeOffset
             });
         }
     }
@@ -192,9 +206,10 @@ function generatePath(start, end, durationMinutes) {
  * @param {Object} disasterPoint - Disaster point {lat, lon}
  * @param {Array} resources - Array of safe house resources
  * @param {Array} responders - Array of responder objects (can be empty initially)
+ * @param {number} pingFrequencySeconds - How often to generate location points (in seconds)
  * @returns {Array} Array of civilian objects
  */
-function generateCivilians(count, timeRangeMinutes, disasterPoint, resources, responders) {
+function generateCivilians(count, timeRangeMinutes, disasterPoint, resources, responders, pingFrequencySeconds = 10) {
     const civilians = [];
     const startTime = Date.now() - (timeRangeMinutes * 60000);
     
@@ -256,7 +271,7 @@ function generateCivilians(count, timeRangeMinutes, disasterPoint, resources, re
         }
         
         // Use curved path for natural movement
-        const path = generateCurvedPath(startPos, endPos, timeRangeMinutes);
+        const path = generateCurvedPath(startPos, endPos, timeRangeMinutes, pingFrequencySeconds);
         
         civilians.push({
             entityId,
@@ -277,9 +292,10 @@ function generateCivilians(count, timeRangeMinutes, disasterPoint, resources, re
  * @param {Object} disasterPoint - Disaster point {lat, lon}
  * @param {Array} incidents - Array of incident objects
  * @param {Array} civilians - Array of civilian objects (can be empty initially)
+ * @param {number} pingFrequencySeconds - How often to generate location points (in seconds)
  * @returns {Array} Array of responder objects
  */
-function generateResponders(count, timeRangeMinutes, disasterPoint, incidents, civilians) {
+function generateResponders(count, timeRangeMinutes, disasterPoint, incidents, civilians, pingFrequencySeconds = 10) {
     const responders = [];
     const startTime = Date.now() - (timeRangeMinutes * 60000);
     
@@ -388,7 +404,7 @@ function generateResponders(count, timeRangeMinutes, disasterPoint, incidents, c
         }
         
         // Use curved path for natural movement
-        const path = generateCurvedPath(startPos, endPos, timeRangeMinutes);
+        const path = generateCurvedPath(startPos, endPos, timeRangeMinutes, pingFrequencySeconds);
         
         responders.push({
             entityId,
@@ -533,11 +549,14 @@ function generateScenario(params) {
     const incidentsList = generateIncidents(incidents, timeRangeMinutes, disasterPoint);
     const hazardsList = generateHazards(hazards, timeRangeMinutes, disasterPoint);
     
+    // Get ping frequency from params (default to 10 seconds)
+    const pingFrequencySeconds = params.pingFrequencySeconds || 10;
+    
     // Generate responders first (civilians may reference them)
-    const respondersList = generateResponders(responders, timeRangeMinutes, disasterPoint, incidentsList, []);
+    const respondersList = generateResponders(responders, timeRangeMinutes, disasterPoint, incidentsList, [], pingFrequencySeconds);
     
     // Generate civilians (they can reference resources and responders)
-    const civiliansList = generateCivilians(civilians, timeRangeMinutes, disasterPoint, resourcesList, respondersList);
+    const civiliansList = generateCivilians(civilians, timeRangeMinutes, disasterPoint, resourcesList, respondersList, pingFrequencySeconds);
     
     // Now update responders with civilian information for better routing
     // (In future, could regenerate responders with civilian clusters, but for now keep as is)
@@ -745,14 +764,24 @@ if (typeof window !== 'undefined') {
             try {
                 // Get form values
                 const timeRangeMinutes = parseInt(document.getElementById('timeRange').value) || 30;
+                const pingFrequencySeconds = parseInt(document.getElementById('pingFrequency').value) || 10;
+                
+                // Calculate expected points per entity for display
+                const expectedPointsPerEntity = Math.floor((timeRangeMinutes * 60) / pingFrequencySeconds);
+                
                 const params = {
                     civilians: parseInt(document.getElementById('civilians').value) || 0,
                     responders: parseInt(document.getElementById('responders').value) || 0,
                     resources: parseInt(document.getElementById('resources').value) || 0,
                     incidents: parseInt(document.getElementById('incidents').value) || 0,
                     hazards: parseInt(document.getElementById('hazards').value) || 0,
-                    timeRangeMinutes: timeRangeMinutes
+                    timeRangeMinutes: timeRangeMinutes,
+                    pingFrequencySeconds: pingFrequencySeconds
                 };
+                
+                // Show expected points in status
+                statusDiv.innerHTML = `<div class="text-blue-600">Generating scenario...</div>`;
+                statusDiv.innerHTML += `<div class="text-sm text-gray-600 mt-2">Expected ${expectedPointsPerEntity} location points per responder/civilian (${timeRangeMinutes} min ÷ ${pingFrequencySeconds}s)</div>`;
                 
                 // Store scenario time range for deep sync
                 const now = Date.now();

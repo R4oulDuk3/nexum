@@ -25,7 +25,7 @@ export async function initMapControl(mapId, map) {
     }
     console.log(`[MapControl] Map control element found: map-control-${mapId}`);
 
-    const updateConfigBtn = document.getElementById(`update-config-btn-${mapId}`);
+    // Sync button might be inside the control or outside (e.g., in debug section)
     const syncBtn = document.getElementById(`sync-btn-${mapId}`);
     const checkboxes = control.querySelectorAll('.entity-type-checkbox');
     const traceCheckbox = control.querySelector('.trace-checkbox');
@@ -35,7 +35,6 @@ export async function initMapControl(mapId, map) {
     const timeUntilValue = document.getElementById(`time-until-value-${mapId}`);
     
     console.log(`[MapControl] UI elements found:`, {
-        updateConfigBtn: !!updateConfigBtn,
         syncBtn: !!syncBtn,
         checkboxes: checkboxes.length,
         traceCheckbox: !!traceCheckbox,
@@ -118,17 +117,21 @@ export async function initMapControl(mapId, map) {
         }
     }
 
-    // Update Config button handler
-    if (updateConfigBtn) {
-        console.log(`[MapControl] Update Config button found and registered for mapId: ${mapId}`);
-        let isUpdating = false;
-        updateConfigBtn.addEventListener('click', async () => {
+    // Save config and refresh map (called on every input change)
+    let isUpdating = false;
+    let updateTimeout = null;
+    async function updateConfigAndRefresh(debounceMs = 100) {
+        // Clear any pending update
+        if (updateTimeout) {
+            clearTimeout(updateTimeout);
+        }
+
+        // Debounce updates to avoid too many rapid changes
+        updateTimeout = setTimeout(async () => {
             if (isUpdating) return;
 
             isUpdating = true;
-            updateConfigBtn.disabled = true;
-            updateConfigBtn.textContent = 'Updating...';
-
+            
             try {
                 const { setMapConfig } = await import('./map-config.js');
 
@@ -179,15 +182,27 @@ export async function initMapControl(mapId, map) {
                 await refreshMap();
             } catch (error) {
                 console.error('Error updating map config:', error);
-                alert('Error updating config: ' + error.message);
+                // Don't alert on every change - just log it
             } finally {
                 isUpdating = false;
-                updateConfigBtn.disabled = false;
-                updateConfigBtn.textContent = 'Update Config';
             }
+        }, debounceMs);
+    }
+
+    // Add event listeners to all checkboxes for auto-update
+    checkboxes.forEach(checkbox => {
+        checkbox.addEventListener('change', () => {
+            console.log(`[MapControl] Entity type checkbox changed: ${checkbox.value} = ${checkbox.checked}`);
+            updateConfigAndRefresh(0); // No debounce for checkboxes - instant update
         });
-    } else {
-        console.warn(`[MapControl] Update Config button not found for mapId: ${mapId}`);
+    });
+
+    // Add event listener to trace checkbox for auto-update
+    if (traceCheckbox) {
+        traceCheckbox.addEventListener('change', () => {
+            console.log(`[MapControl] Trace checkbox changed: ${traceCheckbox.checked}`);
+            updateConfigAndRefresh(0); // No debounce for checkboxes - instant update
+        });
     }
 
     // Sync button handler
@@ -230,7 +245,7 @@ export async function initMapControl(mapId, map) {
         console.warn(`[MapControl] Sync button not found for mapId: ${mapId}`);
     }
 
-    // Add event listeners for time sliders to update display values in real-time
+    // Add event listeners for time sliders to update display values and config in real-time
     if (timeFromSlider && timeFromValue) {
         timeFromSlider.addEventListener('input', (e) => {
             const value = parseInt(e.target.value, 10);
@@ -241,6 +256,9 @@ export async function initMapControl(mapId, map) {
                 timeUntilSlider.value = value;
                 if (timeUntilValue) timeUntilValue.textContent = `${value} min`;
             }
+            
+            // Update config and refresh (debounced for sliders to avoid too many updates)
+            updateConfigAndRefresh(300);
         });
     }
     
@@ -254,6 +272,9 @@ export async function initMapControl(mapId, map) {
                 timeFromSlider.value = value;
                 if (timeFromValue) timeFromValue.textContent = `${value} min`;
             }
+            
+            // Update config and refresh (debounced for sliders to avoid too many updates)
+            updateConfigAndRefresh(300);
         });
     }
 
@@ -264,9 +285,7 @@ export async function initMapControl(mapId, map) {
     // Expose methods
     control.refreshConfig = loadConfig;
     control.refreshMap = refreshMap;
-    control.updateConfig = async () => {
-        if (updateConfigBtn) updateConfigBtn.click();
-    };
+    control.updateConfig = updateConfigAndRefresh;
     
     console.log(`[MapControl] Map control initialized successfully for mapId: ${mapId}`);
     console.log(`[MapControl] Exposed methods: refreshConfig, refreshMap, updateConfig`);
