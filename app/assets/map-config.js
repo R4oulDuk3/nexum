@@ -27,13 +27,19 @@ export async function getMapConfig(mapId = DEFAULT_MAP_ID) {
         if (stored.config && stored.config.entity_types_to_show) {
             return {
                 map_id: mapId,
-                entity_types_to_show: stored.config.entity_types_to_show
+                entity_types_to_show: stored.config.entity_types_to_show,
+                show_traces: stored.config.show_traces || false,
+                time_from_minutes: stored.config.time_from_minutes !== undefined ? stored.config.time_from_minutes : -120,
+                time_until_minutes: stored.config.time_until_minutes !== undefined ? stored.config.time_until_minutes : 0
             };
         } else if (stored.entity_types_to_show) {
             // Legacy format - migrate to new format
             const migrated = {
                 map_id: mapId,
-                entity_types_to_show: stored.entity_types_to_show
+                entity_types_to_show: stored.entity_types_to_show,
+                show_traces: false,
+                time_from_minutes: -120,
+                time_until_minutes: 0
             };
             await setMapConfig(mapId, migrated);
             return migrated;
@@ -42,7 +48,10 @@ export async function getMapConfig(mapId = DEFAULT_MAP_ID) {
         // Fallback
         return {
             map_id: mapId,
-            entity_types_to_show: ['responder', 'civilian', 'incident', 'resource', 'hazard']
+            entity_types_to_show: ['responder', 'civilian', 'incident', 'resource', 'hazard'],
+            show_traces: false,
+            time_from_minutes: -120,
+            time_until_minutes: 0
         };
         
     } catch (error) {
@@ -56,6 +65,9 @@ export async function getMapConfig(mapId = DEFAULT_MAP_ID) {
  * @param {string} mapId - Map ID (default: 'default')
  * @param {Object} config - Configuration object
  * @param {string[]} config.entity_types_to_show - Array of entity types to show
+ * @param {boolean} config.show_traces - Whether to show entity traces (default: false)
+ * @param {number} config.time_from_minutes - Time filter from minutes (default: -120)
+ * @param {number} config.time_until_minutes - Time filter until minutes (default: 0)
  * @returns {Promise<void>}
  */
 export async function setMapConfig(mapId = DEFAULT_MAP_ID, config) {
@@ -63,7 +75,10 @@ export async function setMapConfig(mapId = DEFAULT_MAP_ID, config) {
         await db.map_mode.put({
             map_id: mapId,
             config: {
-                entity_types_to_show: config.entity_types_to_show || []
+                entity_types_to_show: config.entity_types_to_show || [],
+                show_traces: config.show_traces !== undefined ? config.show_traces : false,
+                time_from_minutes: config.time_from_minutes !== undefined ? config.time_from_minutes : -120,
+                time_until_minutes: config.time_until_minutes !== undefined ? config.time_until_minutes : 0
             }
         });
         console.log('🔍 DEBUG - Map config saved:', mapId, config);

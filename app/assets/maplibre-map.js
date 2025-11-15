@@ -576,6 +576,183 @@ export function clearAndSetMarkers(map, locations = []) {
 }
 
 /**
+ * Remove all trace layers and sources from the map
+ * @param {maplibregl.Map} map - The MapLibre map instance
+ */
+function removeAllTraces(map) {
+    try {
+        // Check if map is loaded
+        if (!map.isStyleLoaded()) {
+            console.log('[Traces] Map style not loaded yet, skipping trace removal');
+            return;
+        }
+        
+        // Get all layers and sources that start with 'trace-'
+        const style = map.getStyle();
+        if (!style || !style.layers || !style.sources) {
+            console.log('[Traces] Map style not ready, skipping trace removal');
+            return;
+        }
+        
+        const layers = style.layers || [];
+        const sources = Object.keys(style.sources || {});
+        
+        // Remove trace layers
+        let removedLayers = 0;
+        layers.forEach(layer => {
+            if (layer.id && layer.id.startsWith('trace-layer-')) {
+                try {
+                    if (map.getLayer(layer.id)) {
+                        map.removeLayer(layer.id);
+                        removedLayers++;
+                    }
+                } catch (error) {
+                    // Layer may already be removed or not exist
+                    console.debug(`[Traces] Could not remove layer ${layer.id}:`, error);
+                }
+            }
+        });
+        
+        // Remove trace sources
+        let removedSources = 0;
+        sources.forEach(sourceId => {
+            if (sourceId.startsWith('trace-source-')) {
+                try {
+                    if (map.getSource(sourceId)) {
+                        map.removeSource(sourceId);
+                        removedSources++;
+                    }
+                } catch (error) {
+                    // Source may already be removed or not exist
+                    console.debug(`[Traces] Could not remove source ${sourceId}:`, error);
+                }
+            }
+        });
+        
+        if (removedLayers > 0 || removedSources > 0) {
+            console.log(`[Traces] Removed ${removedLayers} trace layers and ${removedSources} trace sources`);
+        }
+    } catch (error) {
+        console.warn('[Traces] Error removing traces (may not exist):', error);
+    }
+}
+
+/**
+ * Get color for entity type
+ * @param {string} entityType - Entity type
+ * @returns {string} Color hex code
+ */
+function getEntityTypeColor(entityType) {
+    const colors = {
+        'responder': '#3b82f6',    // blue
+        'civilian': '#10b981',     // green
+        'incident': '#ef4444',     // red
+        'resource': '#f97316',     // orange
+        'hazard': '#a855f7'        // purple
+    };
+    return colors[entityType] || '#6b7280'; // default gray
+}
+
+/**
+ * Draw traces (dotted lines) for entities based on location history
+ * @param {maplibregl.Map} map - The MapLibre map instance
+ * @param {Map<string, Array>} groupedByEntity - Map of entity_id -> array of locations
+ * @param {string[]} entityTypes - Array of entity types to filter by (optional)
+ */
+function drawTraces(map, groupedByEntity, entityTypes = null) {
+    console.log('[Traces] Drawing traces for entities...');
+    
+    let tracesDrawn = 0;
+    let skipped = 0;
+    
+    groupedByEntity.forEach((locations, entityId) => {
+        // Filter by entity types if provided
+        if (entityTypes && entityTypes.length > 0) {
+            const firstLocation = locations[0];
+            if (!firstLocation || !entityTypes.includes(firstLocation.entity_type)) {
+                return; // Skip this entity
+            }
+        }
+        
+        // Need at least 2 locations to draw a line
+        if (locations.length < 2) {
+            skipped++;
+            return;
+        }
+        
+        // Sort locations chronologically (oldest to newest) for line drawing
+        const sortedLocations = [...locations].sort((a, b) => {
+            const timeA = typeof a.created_at === 'number' ? a.created_at : new Date(a.created_at).getTime();
+            const timeB = typeof b.created_at === 'number' ? b.created_at : new Date(b.created_at).getTime();
+            return timeA - timeB;
+        });
+        
+        // Create LineString coordinates array
+        const coordinates = sortedLocations.map(loc => [loc.position.lon, loc.position.lat]);
+        
+        // Create GeoJSON LineString feature
+        const geoJson = {
+            type: 'Feature',
+            geometry: {
+                type: 'LineString',
+                coordinates: coordinates
+            },
+            properties: {
+                entity_id: entityId,
+                entity_type: sortedLocations[0].entity_type
+            }
+        };
+        
+        // Create unique source and layer IDs
+        const sourceId = `trace-source-${entityId}`;
+        const layerId = `trace-layer-${entityId}`;
+        
+        try {
+            // Remove existing source/layer if they exist
+            if (map.getLayer(layerId)) {
+                map.removeLayer(layerId);
+            }
+            if (map.getSource(sourceId)) {
+                map.removeSource(sourceId);
+            }
+            
+            // Add GeoJSON source
+            map.addSource(sourceId, {
+                type: 'geojson',
+                data: geoJson
+            });
+            
+            // Get entity type color
+            const entityType = sortedLocations[0].entity_type;
+            const lineColor = getEntityTypeColor(entityType);
+            
+            // Add line layer with dotted style
+            map.addLayer({
+                id: layerId,
+                type: 'line',
+                source: sourceId,
+                layout: {
+                    'line-cap': 'round',
+                    'line-join': 'round'
+                },
+                paint: {
+                    'line-color': lineColor,
+                    'line-width': 2,
+                    'line-opacity': 0.6,
+                    'line-dasharray': [2, 2] // Dotted line
+                }
+            });
+            
+            tracesDrawn++;
+        } catch (error) {
+            console.error(`[Traces] Error drawing trace for entity ${entityId}:`, error);
+        }
+    });
+    
+    console.log(`[Traces] Trace drawing complete: ${tracesDrawn} traces drawn, ${skipped} skipped (insufficient points)`);
+}
+
+/**
  * Refresh map markers based on current config and latest locations from IndexedDB
  * @param {maplibregl.Map} map - The MapLibre map instance
  * @param {string} mapId - Map ID (default: 'default')
@@ -590,7 +767,7 @@ export async function refreshMapMarkers(map, mapId = 'default') {
     try {
         // Import modules dynamically to avoid circular dependencies
         const { getMapConfig } = await import('./map-config.js');
-        const { getLatestLocations } = await import('./location-reader.js');
+        const { getLocationsGroupedByEntity } = await import('./location-reader.js');
         
         // Get map config (may be null if not exists)
         const config = await getMapConfig(mapId);
@@ -598,12 +775,25 @@ export async function refreshMapMarkers(map, mapId = 'default') {
         
         // If no config, show all types
         const entityTypes = config ? (config.entity_types_to_show || []) : ['responder', 'civilian', 'incident', 'resource', 'hazard'];
+        const showTraces = config ? (config.show_traces || false) : false;
+        const timeFromMinutes = config ? (config.time_from_minutes !== undefined ? config.time_from_minutes : -120) : -120;
+        const timeUntilMinutes = config ? (config.time_until_minutes !== undefined ? config.time_until_minutes : 0) : 0;
         console.log(`[MapRefresh] Entity types to show (${entityTypes.length}):`, entityTypes);
+        console.log(`[MapRefresh] Show traces: ${showTraces}`);
+        console.log(`[MapRefresh] Time filter: from ${timeFromMinutes} min to ${timeUntilMinutes} min`);
         
-        // Get latest locations filtered by selected entity types
-        console.log(`[MapRefresh] Fetching latest locations from IndexedDB...`);
-        const locations = await getLatestLocations(entityTypes);
-        console.log(`[MapRefresh] Locations read from IndexedDB: ${locations.length} total`);
+        // Always remove all traces first to clean up old traces
+        removeAllTraces(map);
+        
+        // Get all locations grouped by entity_id, filtered by selected entity types, time window, and Berlin region
+        console.log(`[MapRefresh] Fetching all locations from IndexedDB and grouping by entity_id...`);
+        const { groupedByEntity, latestLocations } = await getLocationsGroupedByEntity(entityTypes, timeFromMinutes, timeUntilMinutes);
+        console.log(`[MapRefresh] Total locations read: ${Array.from(groupedByEntity.values()).reduce((sum, locs) => sum + locs.length, 0)}`);
+        console.log(`[MapRefresh] Unique entities: ${groupedByEntity.size}`);
+        console.log(`[MapRefresh] Latest locations for markers: ${latestLocations.length}`);
+        
+        // Use latest locations from the hashmap for markers
+        const locations = latestLocations;
         
         // Count locations by entity type
         const locationsByType = {};
@@ -620,6 +810,12 @@ export async function refreshMapMarkers(map, mapId = 'default') {
         // Update map markers (this will log add/delete details)
         console.log(`[MapRefresh] Updating map markers...`);
         const updateResult = clearAndSetMarkers(map, locations);
+        
+        // Draw traces if enabled
+        if (showTraces) {
+            console.log(`[MapRefresh] Drawing traces...`);
+            drawTraces(map, groupedByEntity, entityTypes);
+        }
         
         // Get marker count after update
         const newMarkerCount = mapContainer.querySelectorAll('.entity-marker').length;
