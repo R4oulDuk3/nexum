@@ -10,6 +10,14 @@ import { generateRandomBerlinPosition, BERLIN_BOUNDS } from './location-utils.js
 import { deepSyncAllNodes } from './location-sync.js';
 
 /**
+ * Disaster point at center of Berlin (Brandenburg Gate area)
+ */
+export const DISASTER_POINT = {
+    lat: 52.5200,
+    lon: 13.4050
+};
+
+/**
  * Calculate distance between two points (Haversine formula, km)
  */
 function distance(lat1, lon1, lat2, lon2) {
@@ -24,57 +32,231 @@ function distance(lat1, lon1, lat2, lon2) {
 }
 
 /**
- * Generate intermediate positions between start and end
- * Simulates realistic movement (walking speed ~5 km/h)
+ * Get position at specific distance and angle from a center point
+ * @param {Object} center - Center point {lat, lon}
+ * @param {number} distanceKm - Distance in kilometers
+ * @param {number} angle - Angle in radians (0 = North, PI/2 = East)
+ * @returns {Object} Position {lat, lon}
  */
-function generatePath(start, end, durationMinutes) {
+function getPositionAtDistanceFromPoint(center, distanceKm, angle) {
+    // ~111 km per degree latitude
+    const latOffset = (distanceKm / 111) * Math.cos(angle);
+    // Adjust longitude for latitude
+    const lonOffset = (distanceKm / 111) * Math.sin(angle) / Math.cos(center.lat * Math.PI / 180);
+    
+    return {
+        lat: center.lat + latOffset,
+        lon: center.lon + lonOffset
+    };
+}
+
+/**
+ * Get random position within annulus (ring) around center point
+ * @param {Object} center - Center point {lat, lon}
+ * @param {number} minRadiusKm - Minimum radius in kilometers
+ * @param {number} maxRadiusKm - Maximum radius in kilometers
+ * @returns {Object} Random position {lat, lon}
+ */
+function getRandomPositionInRadius(center, minRadiusKm, maxRadiusKm) {
+    // Random distance between min and max
+    const distanceKm = minRadiusKm + Math.random() * (maxRadiusKm - minRadiusKm);
+    // Random angle (0 to 2π)
+    const angle = Math.random() * Math.PI * 2;
+    
+    return getPositionAtDistanceFromPoint(center, distanceKm, angle);
+}
+
+/**
+ * Generate curved path between start and end using Quadratic Bezier curve
+ * Simulates realistic movement (walking speed ~5 km/h) with natural curves
+ */
+function generateCurvedPath(start, end, durationMinutes) {
     const positions = [];
     const steps = Math.max(2, Math.floor(durationMinutes / 2)); // Update every 2 minutes
+    
+    // Calculate straight-line distance
     const totalDistance = distance(start.lat, start.lon, end.lat, end.lon);
     const speedKmH = 5; // Walking speed
     const maxDistance = (speedKmH * durationMinutes) / 60; // Max distance in km
     
-    // If destination is too far, create intermediate waypoint
+    // If destination is too far, adjust end point
+    let adjustedEnd = { ...end };
     if (totalDistance > maxDistance) {
         const ratio = maxDistance / totalDistance;
-        end = {
+        adjustedEnd = {
             lat: start.lat + (end.lat - start.lat) * ratio,
             lon: start.lon + (end.lon - start.lon) * ratio
         };
     }
     
+    // Calculate midpoint
+    const midLat = (start.lat + adjustedEnd.lat) / 2;
+    const midLon = (start.lon + adjustedEnd.lon) / 2;
+    
+    // Create control point offset perpendicular to the line for curve
+    const dx = adjustedEnd.lon - start.lon;
+    const dy = adjustedEnd.lat - start.lat;
+    const lineDist = Math.sqrt(dx * dx + dy * dy);
+    
+    // Calculate perpendicular angle (rotate 90 degrees)
+    const lineAngle = Math.atan2(dy, dx);
+    const perpendicularAngle = lineAngle + Math.PI / 2;
+    
+    // Control point offset: 30-70% of distance, perpendicular to line
+    const curvatureFactor = 0.3 + Math.random() * 0.4; // 30-70%
+    const curvatureDist = curvatureFactor * lineDist * 0.3; // Scale down for subtle curve
+    
+    // Convert curvature distance to lat/lon offset
+    const offsetLat = (curvatureDist / 111) * Math.cos(perpendicularAngle);
+    const offsetLon = (curvatureDist / 111) * Math.sin(perpendicularAngle) / Math.cos(midLat * Math.PI / 180);
+    
+    const controlPoint = {
+        lat: midLat + offsetLat,
+        lon: midLon + offsetLon
+    };
+    
+    // Generate positions along Quadratic Bezier curve
+    // P(t) = (1-t)²P₀ + 2(1-t)tP₁ + t²P₂
     for (let i = 0; i <= steps; i++) {
-        const progress = i / steps;
-        const lat = start.lat + (end.lat - start.lat) * progress;
-        const lon = start.lon + (end.lon - start.lon) * progress;
-        positions.push({ lat, lon, timeOffset: (durationMinutes * progress) * 60000 });
+        const t = i / steps;
+        const oneMinusT = 1 - t;
+        
+        // Quadratic Bezier interpolation
+        const lat = oneMinusT * oneMinusT * start.lat + 
+                    2 * oneMinusT * t * controlPoint.lat + 
+                    t * t * adjustedEnd.lat;
+        const lon = oneMinusT * oneMinusT * start.lon + 
+                    2 * oneMinusT * t * controlPoint.lon + 
+                    t * t * adjustedEnd.lon;
+        
+        positions.push({ 
+            lat, 
+            lon, 
+            timeOffset: (durationMinutes * t) * 60000 
+        });
+    }
+    
+    // Verify speed constraint by calculating total curve distance
+    let totalCurveDistance = 0;
+    for (let i = 1; i < positions.length; i++) {
+        totalCurveDistance += distance(
+            positions[i-1].lat, positions[i-1].lon,
+            positions[i].lat, positions[i].lon
+        );
+    }
+    
+    // If curve is too long, scale down the control point
+    if (totalCurveDistance > maxDistance) {
+        const scaleFactor = maxDistance / totalCurveDistance;
+        const adjustedControlPoint = {
+            lat: midLat + offsetLat * scaleFactor,
+            lon: midLon + offsetLon * scaleFactor
+        };
+        
+        // Regenerate positions with scaled control point
+        positions.length = 0;
+        for (let i = 0; i <= steps; i++) {
+            const t = i / steps;
+            const oneMinusT = 1 - t;
+            
+            const lat = oneMinusT * oneMinusT * start.lat + 
+                        2 * oneMinusT * t * adjustedControlPoint.lat + 
+                        t * t * adjustedEnd.lat;
+            const lon = oneMinusT * oneMinusT * start.lon + 
+                        2 * oneMinusT * t * adjustedControlPoint.lon + 
+                        t * t * adjustedEnd.lon;
+            
+            positions.push({ 
+                lat, 
+                lon, 
+                timeOffset: (durationMinutes * t) * 60000 
+            });
+        }
     }
     
     return positions;
 }
 
 /**
- * Generate civilian scenario - starts scattered, some move toward resources
+ * Legacy function name for backward compatibility
+ * @deprecated Use generateCurvedPath instead
  */
-function generateCivilians(count, timeRangeMinutes, resources) {
+function generatePath(start, end, durationMinutes) {
+    return generateCurvedPath(start, end, durationMinutes);
+}
+
+/**
+ * Generate civilians - start near disaster and flee outward toward responders/safe houses
+ * @param {number} count - Number of civilians to generate
+ * @param {number} timeRangeMinutes - Time range for scenario
+ * @param {Object} disasterPoint - Disaster point {lat, lon}
+ * @param {Array} resources - Array of safe house resources
+ * @param {Array} responders - Array of responder objects (can be empty initially)
+ * @returns {Array} Array of civilian objects
+ */
+function generateCivilians(count, timeRangeMinutes, disasterPoint, resources, responders) {
     const civilians = [];
     const startTime = Date.now() - (timeRangeMinutes * 60000);
     
+    // Helper to find nearest entity position
+    const findNearestEntity = (startPos, entities) => {
+        if (!entities || entities.length === 0) return null;
+        let nearest = null;
+        let minDist = Infinity;
+        entities.forEach(entity => {
+            const pos = entity.position || (entity.path && entity.path[entity.path.length - 1]);
+            if (pos) {
+                const dist = distance(startPos.lat, startPos.lon, pos.lat, pos.lon);
+                if (dist < minDist) {
+                    minDist = dist;
+                    nearest = pos;
+                }
+            }
+        });
+        return nearest;
+    };
+    
     for (let i = 0; i < count; i++) {
         const entityId = generateUUID();
-        const startPos = generateRandomBerlinPosition();
         
-        // 70% chance civilian moves toward nearest resource
+        // Start civilians 0.5-2 km from disaster point (fleeing from disaster)
+        const startPos = getRandomPositionInRadius(disasterPoint, 0.5, 2.0);
+        
+        // Determine destination: flee outward from disaster
         let endPos = startPos;
-        if (Math.random() < 0.7 && resources.length > 0) {
-            const nearestResource = resources[Math.floor(Math.random() * resources.length)];
-            endPos = nearestResource.position;
+        const rand = Math.random();
+        
+        if (rand < 0.6 && resources.length > 0) {
+            // 60% move toward nearest safe house
+            const nearestResource = findNearestEntity(startPos, resources);
+            if (nearestResource) {
+                endPos = nearestResource;
+            } else {
+                // Fallback: move away from disaster (2-5 km)
+                const angle = Math.atan2(startPos.lon - disasterPoint.lon, startPos.lat - disasterPoint.lat);
+                const distanceKm = 2 + Math.random() * 3; // 2-5 km
+                endPos = getPositionAtDistanceFromPoint(startPos, distanceKm, angle);
+            }
+        } else if (rand < 0.9 && responders.length > 0) {
+            // 30% move toward nearest responder location
+            const nearestResponder = findNearestEntity(startPos, responders);
+            if (nearestResponder) {
+                endPos = nearestResponder;
+            } else {
+                // Fallback: move away from disaster
+                const angle = Math.atan2(startPos.lon - disasterPoint.lon, startPos.lat - disasterPoint.lat);
+                const distanceKm = 2 + Math.random() * 3;
+                endPos = getPositionAtDistanceFromPoint(startPos, distanceKm, angle);
+            }
         } else {
-            // Random movement
-            endPos = generateRandomBerlinPosition();
+            // 10% move to random position away from disaster (2-5 km)
+            const angle = Math.atan2(startPos.lon - disasterPoint.lon, startPos.lat - disasterPoint.lat);
+            const distanceKm = 2 + Math.random() * 3; // 2-5 km
+            endPos = getPositionAtDistanceFromPoint(startPos, distanceKm, angle);
         }
         
-        const path = generatePath(startPos, endPos, timeRangeMinutes);
+        // Use curved path for natural movement
+        const path = generateCurvedPath(startPos, endPos, timeRangeMinutes);
         
         civilians.push({
             entityId,
@@ -89,35 +271,124 @@ function generateCivilians(count, timeRangeMinutes, resources) {
 }
 
 /**
- * Generate responder scenario - start near incidents, patrol area
+ * Generate responders - start away from disaster and move inward toward incidents/civilians
+ * @param {number} count - Number of responders to generate
+ * @param {number} timeRangeMinutes - Time range for scenario
+ * @param {Object} disasterPoint - Disaster point {lat, lon}
+ * @param {Array} incidents - Array of incident objects
+ * @param {Array} civilians - Array of civilian objects (can be empty initially)
+ * @returns {Array} Array of responder objects
  */
-function generateResponders(count, timeRangeMinutes, incidents) {
+function generateResponders(count, timeRangeMinutes, disasterPoint, incidents, civilians) {
     const responders = [];
     const startTime = Date.now() - (timeRangeMinutes * 60000);
     
+    // Helper to find nearest entity position
+    const findNearestEntity = (startPos, entities) => {
+        if (!entities || entities.length === 0) return null;
+        let nearest = null;
+        let minDist = Infinity;
+        entities.forEach(entity => {
+            const pos = entity.position || (entity.path && entity.path[entity.path.length - 1]);
+            if (pos) {
+                const dist = distance(startPos.lat, startPos.lon, pos.lat, pos.lon);
+                if (dist < minDist) {
+                    minDist = dist;
+                    nearest = pos;
+                }
+            }
+        });
+        return nearest;
+    };
+    
+    // Helper to find nearest civilian cluster (average position of nearby civilians)
+    const findNearestCivilianCluster = (startPos, civilians) => {
+        if (!civilians || civilians.length === 0) return null;
+        
+        // Group civilians by proximity
+        const clusters = [];
+        const used = new Set();
+        
+        civilians.forEach((civilian, idx) => {
+            if (used.has(idx)) return;
+            const pos = civilian.path && civilian.path[0]; // Start position
+            if (!pos) return;
+            
+            const cluster = [pos];
+            used.add(idx);
+            
+            // Find nearby civilians (within 0.5 km)
+            civilians.forEach((other, otherIdx) => {
+                if (otherIdx === idx || used.has(otherIdx)) return;
+                const otherPos = other.path && other.path[0];
+                if (otherPos && distance(pos.lat, pos.lon, otherPos.lat, otherPos.lon) < 0.5) {
+                    cluster.push(otherPos);
+                    used.add(otherIdx);
+                }
+            });
+            
+            if (cluster.length > 0) {
+                // Average position of cluster
+                const avgLat = cluster.reduce((sum, p) => sum + p.lat, 0) / cluster.length;
+                const avgLon = cluster.reduce((sum, p) => sum + p.lon, 0) / cluster.length;
+                clusters.push({ lat: avgLat, lon: avgLon, size: cluster.length });
+            }
+        });
+        
+        // Find nearest cluster
+        let nearest = null;
+        let minDist = Infinity;
+        clusters.forEach(cluster => {
+            const dist = distance(startPos.lat, startPos.lon, cluster.lat, cluster.lon);
+            if (dist < minDist) {
+                minDist = dist;
+                nearest = { lat: cluster.lat, lon: cluster.lon };
+            }
+        });
+        
+        return nearest;
+    };
+    
     for (let i = 0; i < count; i++) {
         const entityId = generateUUID();
-        // Start near an incident or random
-        let startPos = generateRandomBerlinPosition();
-        if (incidents.length > 0 && Math.random() < 0.6) {
-            const incident = incidents[Math.floor(Math.random() * incidents.length)];
-            // Start 1-3km from incident
-            const angle = Math.random() * Math.PI * 2;
-            const dist = 1 + Math.random() * 2; // 1-3 km
-            startPos = {
-                lat: incident.position.lat + (dist / 111) * Math.cos(angle),
-                lon: incident.position.lon + (dist / 111) * Math.cos(angle) / Math.cos(incident.position.lat * Math.PI / 180)
-            };
+        
+        // Start responders 3-6 km from disaster point (behind safe houses, away from disaster)
+        let startPos = getRandomPositionInRadius(disasterPoint, 3, 6);
+        
+        // Determine destination: move inward toward disaster area
+        let endPos = startPos;
+        const rand = Math.random();
+        
+        if (rand < 0.5 && incidents.length > 0) {
+            // 50% move toward nearest incident
+            const nearestIncident = findNearestEntity(startPos, incidents);
+            if (nearestIncident) {
+                endPos = nearestIncident;
+            } else {
+                // Fallback: move toward disaster point
+                endPos = getRandomPositionInRadius(disasterPoint, 0.5, 2.0);
+            }
+        } else if (rand < 0.8 && civilians.length > 0) {
+            // 30% move toward nearest civilian cluster
+            const nearestCluster = findNearestCivilianCluster(startPos, civilians);
+            if (nearestCluster) {
+                endPos = nearestCluster;
+            } else {
+                // Fallback: use first civilian start position
+                const firstCivilian = civilians[0];
+                if (firstCivilian && firstCivilian.path && firstCivilian.path[0]) {
+                    endPos = firstCivilian.path[0];
+                } else {
+                    endPos = getRandomPositionInRadius(disasterPoint, 0.5, 2.0);
+                }
+            }
+        } else {
+            // 20% move toward disaster point
+            endPos = getRandomPositionInRadius(disasterPoint, 0.5, 2.0);
         }
         
-        // Patrol toward incident or random area
-        let endPos = generateRandomBerlinPosition();
-        if (incidents.length > 0 && Math.random() < 0.8) {
-            const incident = incidents[Math.floor(Math.random() * incidents.length)];
-            endPos = incident.position;
-        }
-        
-        const path = generatePath(startPos, endPos, timeRangeMinutes);
+        // Use curved path for natural movement
+        const path = generateCurvedPath(startPos, endPos, timeRangeMinutes);
         
         responders.push({
             entityId,
@@ -132,17 +403,27 @@ function generateResponders(count, timeRangeMinutes, incidents) {
 }
 
 /**
- * Generate resources - appear at fixed locations at specific times
+ * Generate resources (safe houses) - positioned away from disaster, behind responders
+ * @param {number} count - Number of safe houses to generate
+ * @param {number} timeRangeMinutes - Time range for scenario
+ * @param {Object} disasterPoint - Disaster point {lat, lon}
+ * @returns {Array} Array of resource objects
  */
-function generateResources(count, timeRangeMinutes) {
+function generateResources(count, timeRangeMinutes, disasterPoint) {
     const resources = [];
     const startTime = Date.now() - (timeRangeMinutes * 60000);
     
     for (let i = 0; i < count; i++) {
         const entityId = generateUUID();
-        const position = generateRandomBerlinPosition();
-        // Appear at random time during scenario (but not at the very end)
-        const appearTime = startTime + Math.random() * (timeRangeMinutes * 0.8) * 60000;
+        
+        // Position safe houses 4-8 km away from disaster point
+        // Distribute in multiple directions (use angles for distribution)
+        const angle = (i * (2 * Math.PI / Math.max(count, 6))) + (Math.random() * 0.3); // Distribute evenly with slight randomness
+        const distanceKm = 4 + Math.random() * 4; // 4-8 km
+        const position = getPositionAtDistanceFromPoint(disasterPoint, distanceKm, angle);
+        
+        // Safe houses appear early in scenario (within first 30% of time range)
+        const appearTime = startTime + Math.random() * (timeRangeMinutes * 0.3) * 60000;
         
         resources.push({
             entityId,
@@ -158,9 +439,13 @@ function generateResources(count, timeRangeMinutes) {
 }
 
 /**
- * Generate incidents - appear at random times and locations
+ * Generate incidents - clustered around disaster point
+ * @param {number} count - Number of incidents to generate
+ * @param {number} timeRangeMinutes - Time range for scenario
+ * @param {Object} disasterPoint - Disaster point {lat, lon}
+ * @returns {Array} Array of incident objects
  */
-function generateIncidents(count, timeRangeMinutes) {
+function generateIncidents(count, timeRangeMinutes, disasterPoint) {
     const incidents = [];
     const startTime = Date.now() - (timeRangeMinutes * 60000);
     
@@ -168,7 +453,11 @@ function generateIncidents(count, timeRangeMinutes) {
     
     for (let i = 0; i < count; i++) {
         const entityId = generateUUID();
-        const position = generateRandomBerlinPosition();
+        
+        // Position incidents 0.3-1.5 km from disaster point (clustered around disaster)
+        const position = getRandomPositionInRadius(disasterPoint, 0.3, 1.5);
+        
+        // Incidents appear early-mid scenario (within first 70% of time range)
         const appearTime = startTime + Math.random() * (timeRangeMinutes * 0.7) * 60000;
         
         incidents.push({
@@ -185,9 +474,13 @@ function generateIncidents(count, timeRangeMinutes) {
 }
 
 /**
- * Generate hazards - appear at fixed locations
+ * Generate hazards - tightly clustered around disaster point
+ * @param {number} count - Number of hazards to generate
+ * @param {number} timeRangeMinutes - Time range for scenario
+ * @param {Object} disasterPoint - Disaster point {lat, lon}
+ * @returns {Array} Array of hazard objects
  */
-function generateHazards(count, timeRangeMinutes) {
+function generateHazards(count, timeRangeMinutes, disasterPoint) {
     const hazards = [];
     const startTime = Date.now() - (timeRangeMinutes * 60000);
     
@@ -195,8 +488,11 @@ function generateHazards(count, timeRangeMinutes) {
     
     for (let i = 0; i < count; i++) {
         const entityId = generateUUID();
-        const position = generateRandomBerlinPosition();
-        // Hazards appear early in scenario
+        
+        // Position hazards 0.2-1.0 km from disaster point (closer than incidents)
+        const position = getRandomPositionInRadius(disasterPoint, 0.2, 1.0);
+        
+        // Hazards appear very early in scenario (within first 30% of time range)
         const appearTime = startTime + Math.random() * (timeRangeMinutes * 0.3) * 60000;
         
         hazards.push({
@@ -227,12 +523,24 @@ function generateScenario(params) {
     
     console.log('[Scenario] Generating scenario...', params);
     
-    // Generate all entities
-    const resourcesList = generateResources(resources, timeRangeMinutes);
-    const incidentsList = generateIncidents(incidents, timeRangeMinutes);
-    const hazardsList = generateHazards(hazards, timeRangeMinutes);
-    const civiliansList = generateCivilians(civilians, timeRangeMinutes, resourcesList);
-    const respondersList = generateResponders(responders, timeRangeMinutes, incidentsList);
+    // Define disaster point at center of Berlin
+    const disasterPoint = DISASTER_POINT;
+    console.log(`[Scenario] Disaster point: (${disasterPoint.lat}, ${disasterPoint.lon})`);
+    
+    // Generate all entities in order (static first, then dynamic)
+    // Static entities appear at fixed locations
+    const resourcesList = generateResources(resources, timeRangeMinutes, disasterPoint);
+    const incidentsList = generateIncidents(incidents, timeRangeMinutes, disasterPoint);
+    const hazardsList = generateHazards(hazards, timeRangeMinutes, disasterPoint);
+    
+    // Generate responders first (civilians may reference them)
+    const respondersList = generateResponders(responders, timeRangeMinutes, disasterPoint, incidentsList, []);
+    
+    // Generate civilians (they can reference resources and responders)
+    const civiliansList = generateCivilians(civilians, timeRangeMinutes, disasterPoint, resourcesList, respondersList);
+    
+    // Now update responders with civilian information for better routing
+    // (In future, could regenerate responders with civilian clusters, but for now keep as is)
     
     // Collect all events with timestamps
     const events = [];

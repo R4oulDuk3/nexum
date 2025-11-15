@@ -28,11 +28,19 @@ export async function initMapControl(mapId, map) {
     const updateConfigBtn = document.getElementById(`update-config-btn-${mapId}`);
     const syncBtn = document.getElementById(`sync-btn-${mapId}`);
     const checkboxes = control.querySelectorAll('.entity-type-checkbox');
+    const traceCheckbox = control.querySelector('.trace-checkbox');
+    const timeFromSlider = document.getElementById(`time-from-slider-${mapId}`);
+    const timeUntilSlider = document.getElementById(`time-until-slider-${mapId}`);
+    const timeFromValue = document.getElementById(`time-from-value-${mapId}`);
+    const timeUntilValue = document.getElementById(`time-until-value-${mapId}`);
     
     console.log(`[MapControl] UI elements found:`, {
         updateConfigBtn: !!updateConfigBtn,
         syncBtn: !!syncBtn,
-        checkboxes: checkboxes.length
+        checkboxes: checkboxes.length,
+        traceCheckbox: !!traceCheckbox,
+        timeFromSlider: !!timeFromSlider,
+        timeUntilSlider: !!timeUntilSlider
     });
 
     // Load config and update checkboxes
@@ -62,6 +70,28 @@ export async function initMapControl(mapId, map) {
             });
             
             console.log(`[MapControl] Updated ${checkboxes.length} checkboxes (${checkedCount} checked)`);
+            
+            // Load show_traces checkbox state
+            if (traceCheckbox) {
+                const showTraces = config && config.show_traces !== undefined ? config.show_traces : false;
+                traceCheckbox.checked = showTraces;
+                console.log(`[MapControl] Trace checkbox set to ${showTraces ? 'checked' : 'unchecked'}`);
+            }
+            
+            // Load time filter sliders
+            if (timeFromSlider && timeFromValue) {
+                const timeFromMinutes = config && config.time_from_minutes !== undefined ? config.time_from_minutes : -120;
+                timeFromSlider.value = timeFromMinutes;
+                timeFromValue.textContent = `${timeFromMinutes} min`;
+                console.log(`[MapControl] Time from slider set to ${timeFromMinutes} min`);
+            }
+            
+            if (timeUntilSlider && timeUntilValue) {
+                const timeUntilMinutes = config && config.time_until_minutes !== undefined ? config.time_until_minutes : 0;
+                timeUntilSlider.value = timeUntilMinutes;
+                timeUntilValue.textContent = `${timeUntilMinutes} min`;
+                console.log(`[MapControl] Time until slider set to ${timeUntilMinutes} min`);
+            }
         } catch (error) {
             console.error(`[MapControl] Error loading map config for ${mapId}:`, error);
             // On error, default to all checked
@@ -100,14 +130,50 @@ export async function initMapControl(mapId, map) {
             updateConfigBtn.textContent = 'Updating...';
 
             try {
-                const { setEntityTypesToShow } = await import('./map-config.js');
+                const { setMapConfig } = await import('./map-config.js');
 
                 const selectedTypes = Array.from(checkboxes)
                     .filter(cb => cb.checked)
                     .map(cb => cb.value);
 
-                await setEntityTypesToShow(mapId, selectedTypes);
-                console.log('Config updated for map:', mapId, selectedTypes);
+                const showTraces = traceCheckbox ? traceCheckbox.checked : false;
+                
+                // Get time filter values
+                let timeFromMinutes = timeFromSlider ? parseInt(timeFromSlider.value, 10) : -120;
+                let timeUntilMinutes = timeUntilSlider ? parseInt(timeUntilSlider.value, 10) : 0;
+                
+                // Validate: time_from <= time_until (adjust if needed)
+                if (timeFromMinutes > timeUntilMinutes) {
+                    // Swap values if from > until
+                    const temp = timeFromMinutes;
+                    timeFromMinutes = timeUntilMinutes;
+                    timeUntilMinutes = temp;
+                    
+                    // Update sliders and displays
+                    if (timeFromSlider) {
+                        timeFromSlider.value = timeFromMinutes;
+                        if (timeFromValue) timeFromValue.textContent = `${timeFromMinutes} min`;
+                    }
+                    if (timeUntilSlider) {
+                        timeUntilSlider.value = timeUntilMinutes;
+                        if (timeUntilValue) timeUntilValue.textContent = `${timeUntilMinutes} min`;
+                    }
+                    
+                    console.log(`[MapControl] Adjusted time filter: from ${timeFromMinutes} to ${timeUntilMinutes} min`);
+                }
+
+                await setMapConfig(mapId, {
+                    entity_types_to_show: selectedTypes,
+                    show_traces: showTraces,
+                    time_from_minutes: timeFromMinutes,
+                    time_until_minutes: timeUntilMinutes
+                });
+                console.log('Config updated for map:', mapId, { 
+                    entity_types_to_show: selectedTypes, 
+                    show_traces: showTraces,
+                    time_from_minutes: timeFromMinutes,
+                    time_until_minutes: timeUntilMinutes
+                });
                 
                 // Refresh map after config update
                 await refreshMap();
@@ -162,6 +228,33 @@ export async function initMapControl(mapId, map) {
         });
     } else {
         console.warn(`[MapControl] Sync button not found for mapId: ${mapId}`);
+    }
+
+    // Add event listeners for time sliders to update display values in real-time
+    if (timeFromSlider && timeFromValue) {
+        timeFromSlider.addEventListener('input', (e) => {
+            const value = parseInt(e.target.value, 10);
+            timeFromValue.textContent = `${value} min`;
+            
+            // Ensure from <= until
+            if (timeUntilSlider && value > parseInt(timeUntilSlider.value, 10)) {
+                timeUntilSlider.value = value;
+                if (timeUntilValue) timeUntilValue.textContent = `${value} min`;
+            }
+        });
+    }
+    
+    if (timeUntilSlider && timeUntilValue) {
+        timeUntilSlider.addEventListener('input', (e) => {
+            const value = parseInt(e.target.value, 10);
+            timeUntilValue.textContent = `${value} min`;
+            
+            // Ensure from <= until
+            if (timeFromSlider && value < parseInt(timeFromSlider.value, 10)) {
+                timeFromSlider.value = value;
+                if (timeFromValue) timeFromValue.textContent = `${value} min`;
+            }
+        });
     }
 
     // Load initial config

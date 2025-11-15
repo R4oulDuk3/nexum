@@ -6,6 +6,28 @@
  */
 
 import db from './location-sync-db.js';
+import { BERLIN_BOUNDS } from './location-utils.js';
+
+/**
+ * Check if a location is within Berlin region bounds
+ * @param {Object} location - Location object with position: {lat, lon}
+ * @returns {boolean} True if location is within Berlin bounds
+ */
+function isInBerlinRegion(location) {
+    if (!location || !location.position) {
+        return false;
+    }
+    
+    const lat = location.position.lat;
+    const lon = location.position.lon;
+    
+    return (
+        lat >= BERLIN_BOUNDS.minLat &&
+        lat <= BERLIN_BOUNDS.maxLat &&
+        lon >= BERLIN_BOUNDS.minLon &&
+        lon <= BERLIN_BOUNDS.maxLon
+    );
+}
 
 /**
  * Get latest location per entity, filtered by entity types
@@ -122,6 +144,93 @@ export async function getLatestLocationForEntity(entityId) {
         return await db.latest_locations.get(entityId) || null;
     } catch (error) {
         console.error(`Error getting latest location for entity ${entityId}:`, error);
+        throw error;
+    }
+}
+
+/**
+ * Get all locations grouped by entity_id
+ * Returns both the grouped hashmap (for future features) and latest locations for markers
+ * @param {string[]} entityTypes - Array of entity types to filter by (optional)
+ * @param {number} timeFromMinutes - Time filter from minutes relative to now (default: -120)
+ * @param {number} timeUntilMinutes - Time filter until minutes relative to now (default: 0)
+ * @returns {Promise<{groupedByEntity: Map<string, Array>, latestLocations: Array}>}
+ *   - groupedByEntity: Map of entity_id -> array of all locations for that entity
+ *   - latestLocations: Array of latest location per entity (for markers)
+ */
+export async function getLocationsGroupedByEntity(entityTypes = null, timeFromMinutes = -120, timeUntilMinutes = 0) {
+    try {
+        // Get all locations from the locations table
+        let allLocations;
+        if (entityTypes && entityTypes.length > 0) {
+            // Filter by entity types
+            const results = [];
+            for (const entityType of entityTypes) {
+                const locations = await db.locations
+                    .where('entity_type')
+                    .equals(entityType)
+                    .toArray();
+                results.push(...locations);
+            }
+            allLocations = results;
+        } else {
+            // Get all locations
+            allLocations = await db.locations.toArray();
+        }
+        
+        // Calculate time filter boundaries
+        const currentTime = Date.now();
+        const fromTime = currentTime + (timeFromMinutes * 60 * 1000);
+        const untilTime = currentTime + (timeUntilMinutes * 60 * 1000);
+        
+        // Filter locations by time window and Berlin region
+        const filteredLocations = allLocations.filter(location => {
+            // Check if location is in Berlin region
+            if (!isInBerlinRegion(location)) {
+                return false;
+            }
+            
+            // Check if location is within time window
+            const locationTime = typeof location.created_at === 'number' 
+                ? location.created_at 
+                : new Date(location.created_at).getTime();
+            
+            return locationTime >= fromTime && locationTime <= untilTime;
+        });
+        
+        // Group by entity_id
+        const groupedByEntity = new Map();
+        filteredLocations.forEach(location => {
+            const entityId = location.entity_id;
+            if (!groupedByEntity.has(entityId)) {
+                groupedByEntity.set(entityId, []);
+            }
+            groupedByEntity.get(entityId).push(location);
+        });
+        
+        // Sort each group by created_at (newest first) and get latest
+        const latestLocations = [];
+        groupedByEntity.forEach((locations, entityId) => {
+            // Sort by created_at descending (newest first)
+            locations.sort((a, b) => {
+                const timeA = typeof a.created_at === 'number' ? a.created_at : new Date(a.created_at).getTime();
+                const timeB = typeof b.created_at === 'number' ? b.created_at : new Date(b.created_at).getTime();
+                return timeB - timeA;
+            });
+            
+            // Latest location is the first one after sorting
+            if (locations.length > 0) {
+                latestLocations.push(locations[0]);
+            }
+        });
+        
+        return {
+            groupedByEntity,
+            latestLocations
+        };
+        
+    } catch (error) {
+        console.error('Error getting locations grouped by entity:', error);
         throw error;
     }
 }
