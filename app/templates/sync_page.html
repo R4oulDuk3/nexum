@@ -74,6 +74,34 @@
         </div>
     </div>
 
+    <!-- Debug Section -->
+    <div class="bg-white shadow rounded-lg p-6 mb-6 border-2 border-yellow-200">
+        <h3 class="text-lg font-medium text-gray-900 mb-4">Debug Tools</h3>
+        <div class="flex gap-4">
+            <button 
+                id="deepSyncButton" 
+                onclick="triggerDeepSync()"
+                class="bg-purple-600 hover:bg-purple-700 text-white px-6 py-2 rounded-md text-sm font-medium transition-colors"
+            >
+                Deep Sync (Last 3 Hours)
+            </button>
+            <button 
+                id="clearDbButton" 
+                onclick="clearLocalState()"
+                class="bg-red-600 hover:bg-red-700 text-white px-6 py-2 rounded-md text-sm font-medium transition-colors"
+            >
+                Clear Local State
+            </button>
+        </div>
+        <div id="debugProgress" class="sync-progress hidden mt-4">
+            <div class="flex items-center mb-2">
+                <span class="status-indicator status-pending"></span>
+                <span id="debugStatus" class="text-sm font-medium">Processing...</span>
+            </div>
+            <div id="debugDetails" class="text-sm text-gray-600"></div>
+        </div>
+    </div>
+
     <!-- Statistics -->
     <div class="grid grid-cols-1 md:grid-cols-4 gap-4 mb-6">
         <div class="stat-card">
@@ -154,10 +182,12 @@
 <script type="module">
     import * as LocationSync from "{{ url_for('static', filename='location-sync.js') }}";
     import * as LocationReader from "{{ url_for('static', filename='location-reader.js') }}";
+    import db from "{{ url_for('static', filename='location-sync-db.js') }}";
     
     // Make functions globally available
     window.LocationSync = LocationSync;
     window.LocationReader = LocationReader;
+    window.locationDb = db;
     
     // Refresh functions (define them here so they're in module scope)
     async function refreshSyncStatus() {
@@ -295,6 +325,103 @@
         } finally {
             button.disabled = false;
             button.textContent = 'Sync All Nodes';
+            
+            // Hide progress after 3 seconds
+            setTimeout(() => {
+                progress.classList.add('hidden');
+            }, 3000);
+        }
+    };
+    
+    // Deep sync (last 3 hours)
+    window.triggerDeepSync = async function() {
+        const button = document.getElementById('deepSyncButton');
+        const progress = document.getElementById('debugProgress');
+        const status = document.getElementById('debugStatus');
+        const details = document.getElementById('debugDetails');
+        
+        button.disabled = true;
+        button.textContent = 'Syncing...';
+        progress.classList.remove('hidden');
+        status.textContent = 'Deep syncing with all nodes (last 3 hours)...';
+        details.textContent = '';
+        
+        try {
+            const now = Date.now();
+            const threeHoursAgo = now - (3 * 60 * 60 * 1000); // 3 hours in milliseconds
+            
+            const result = await LocationSync.deepSyncAllNodes(threeHoursAgo, now);
+            
+            status.textContent = `Deep sync completed: ${result.synced}/${result.total} nodes`;
+            details.textContent = `Total locations: ${result.totalCount}. `;
+            
+            if (result.errors.length > 0) {
+                details.textContent += `Errors: ${result.errors.length}`;
+                console.error('Deep sync errors:', result.errors);
+            }
+            
+            // Refresh displays
+            refreshSyncStatus();
+            refreshStats();
+            refreshDataView();
+            
+        } catch (error) {
+            status.textContent = 'Deep sync failed';
+            details.textContent = error.message || String(error);
+            console.error('Deep sync error:', error);
+        } finally {
+            button.disabled = false;
+            button.textContent = 'Deep Sync (Last 3 Hours)';
+            
+            // Hide progress after 3 seconds
+            setTimeout(() => {
+                progress.classList.add('hidden');
+            }, 3000);
+        }
+    };
+    
+    // Clear local state (IndexedDB)
+    window.clearLocalState = async function() {
+        const button = document.getElementById('clearDbButton');
+        const progress = document.getElementById('debugProgress');
+        const status = document.getElementById('debugStatus');
+        const details = document.getElementById('debugDetails');
+        
+        if (!confirm('Are you sure you want to clear all local state? This will delete all synced location data from IndexedDB.')) {
+            return;
+        }
+        
+        button.disabled = true;
+        button.textContent = 'Clearing...';
+        progress.classList.remove('hidden');
+        status.textContent = 'Clearing local state...';
+        details.textContent = '';
+        
+        try {
+            // Clear all tables in IndexedDB
+            await db.transaction('rw', db.locations, db.latest_locations, db.node_sync, db.map_mode, async () => {
+                await db.locations.clear();
+                await db.latest_locations.clear();
+                await db.node_sync.clear();
+                // Keep map_mode (don't clear map configurations)
+                // await db.map_mode.clear();
+            });
+            
+            status.textContent = 'Local state cleared successfully';
+            details.textContent = 'All location data and sync states have been cleared from IndexedDB.';
+            
+            // Refresh displays
+            refreshSyncStatus();
+            refreshStats();
+            refreshDataView();
+            
+        } catch (error) {
+            status.textContent = 'Clear failed';
+            details.textContent = error.message || String(error);
+            console.error('Clear error:', error);
+        } finally {
+            button.disabled = false;
+            button.textContent = 'Clear Local State';
             
             // Hide progress after 3 seconds
             setTimeout(() => {
