@@ -1,26 +1,30 @@
 /**
- * Header Controls - Broadcast status indicator and user type switch
+ * Header Controls - Broadcast and sync status indicators, user type switch
  * 
  * Manages:
  * - Broadcast status indicator (shows GPS broadcasting status, auto-starts on load)
+ * - Sync status indicator (shows mesh sync status, auto-starts on load)
  * - User type switch (responder/civilian)
  * - localStorage persistence for user type
- * - Auto-starts broadcasting when app opens
- * - Ping animation on successful broadcast
+ * - Auto-starts broadcasting and syncing when app opens
+ * - Ping animations on successful broadcast and sync
  */
 
 // Import dependencies
 import * as LocationSender from './location-sender.js';
 import { LocationTracker } from './location-tracker.js';
+import { SyncTracker } from './location-sync-tracker.js';
 
 // Constants for localStorage keys
 const STORAGE_KEYS = {
     USER_TYPE: 'user_role'  // Same as location-sender.js uses
 };
 
-// Global tracker instance
+// Global tracker instances
 let headerTracker = null;
+let headerSyncTracker = null;
 const TRACKING_INTERVAL = 5000; // 5 seconds
+const SYNC_INTERVAL = 10000; // 10 seconds
 
 
 /**
@@ -82,7 +86,7 @@ function updateBroadcastIndicator() {
  * Trigger ping animation on successful broadcast
  * Creates a visual "ping" effect when data is sent successfully
  */
-function triggerPingAnimation() {
+function triggerBroadcastPing() {
     const indicator = document.getElementById('headerBroadcastBtn');
     if (!indicator) return;
     
@@ -92,6 +96,50 @@ function triggerPingAnimation() {
     // Remove class after animation completes
     setTimeout(() => {
         indicator.classList.remove('broadcast-ping');
+    }, 600);
+}
+
+/**
+ * Update sync status indicator UI
+ * Shows syncing status with animated icon
+ */
+function updateSyncIndicator() {
+    const indicator = document.getElementById('headerSyncBtn');
+    const indicatorText = document.getElementById('syncBtnText');
+    const icon = document.getElementById('syncIcon');
+    
+    if (!indicator) return;
+    
+    // Always show syncing state (since we auto-start)
+    indicator.classList.remove('bg-green-600', 'hover:bg-green-700', 'bg-red-600', 'hover:bg-red-700');
+    indicator.classList.add('bg-purple-600');
+    
+    if (indicatorText) {
+        indicatorText.textContent = 'Syncing Mesh';
+    }
+    
+    // Show animated sync icon (already in HTML, but ensure it's set)
+    if (icon) {
+        icon.setAttribute('fill', 'none');
+        icon.setAttribute('stroke', 'currentColor');
+        icon.setAttribute('viewBox', '0 0 24 24');
+    }
+}
+
+/**
+ * Trigger ping animation on successful sync
+ * Creates a visual "ping" effect when sync completes successfully
+ */
+function triggerSyncPing() {
+    const indicator = document.getElementById('headerSyncBtn');
+    if (!indicator) return;
+    
+    // Add ping animation class
+    indicator.classList.add('sync-ping');
+    
+    // Remove class after animation completes
+    setTimeout(() => {
+        indicator.classList.remove('sync-ping');
     }, 600);
 }
 
@@ -115,7 +163,7 @@ function startBroadcasting() {
         (data) => {
             // Success callback - trigger ping animation
             console.log('Location broadcasted:', data);
-            triggerPingAnimation();
+            triggerBroadcastPing();
         },
         (error) => {
             // Error callback
@@ -135,6 +183,51 @@ function stopBroadcasting() {
     if (headerTracker) {
         headerTracker.stop();
         headerTracker = null;
+    }
+}
+
+/**
+ * Start mesh synchronization
+ * Auto-starts on app initialization
+ */
+function startSyncing() {
+    if (headerSyncTracker && headerSyncTracker.isTracking) {
+        console.log('Syncing already started');
+        return;
+    }
+    
+    // Create or get sync tracker instance
+    if (!headerSyncTracker) {
+        headerSyncTracker = new SyncTracker(SYNC_INTERVAL);
+    }
+    
+    // Start syncing with callbacks
+    headerSyncTracker.start(
+        (result) => {
+            // Success callback - trigger ping animation
+            console.log('Mesh sync completed:', result);
+            if (result && result.synced !== undefined) {
+                triggerSyncPing();
+            }
+        },
+        (error) => {
+            // Error callback
+            console.error('Mesh sync error:', error);
+        }
+    );
+    
+    // Update UI
+    updateSyncIndicator();
+}
+
+/**
+ * Stop mesh synchronization
+ * Note: Not typically used since syncing auto-starts and is always on
+ */
+function stopSyncing() {
+    if (headerSyncTracker) {
+        headerSyncTracker.stop();
+        headerSyncTracker = null;
     }
 }
 
@@ -159,7 +252,7 @@ function handleUserTypeChange(event) {
 
 /**
  * Initialize header controls
- * Auto-starts broadcasting when app opens
+ * Auto-starts broadcasting and syncing when app opens
  */
 function initializeHeaderControls() {
     // Initialize user type switch
@@ -186,15 +279,35 @@ function initializeHeaderControls() {
             startBroadcasting();
         }, 500);
     }
+    
+    // Initialize sync status indicator
+    const syncIndicator = document.getElementById('headerSyncBtn');
+    if (syncIndicator) {
+        // Update UI to show syncing state
+        updateSyncIndicator();
+        
+        // Remove click handler - it's now just an indicator, not a button
+        syncIndicator.style.cursor = 'default';
+        
+        // Auto-start syncing when app opens
+        console.log('Auto-starting mesh synchronization...');
+        // Small delay to ensure everything is loaded (longer than broadcast)
+        setTimeout(() => {
+            startSyncing();
+        }, 1000);
+    }
 }
 
 /**
  * Cleanup on page unload
  */
 function cleanupHeaderControls() {
-    // Broadcasting always restarts on page load, no need to save state
+    // Broadcasting and syncing always restart on page load, no need to save state
     if (headerTracker && headerTracker.isTracking) {
         headerTracker.stop();
+    }
+    if (headerSyncTracker && headerSyncTracker.isTracking) {
+        headerSyncTracker.stop();
     }
 }
 
@@ -215,10 +328,14 @@ if (typeof document !== 'undefined') {
 export {
     startBroadcasting,
     stopBroadcasting,
+    startSyncing,
+    stopSyncing,
     getUserType,
     setUserType,
     updateBroadcastIndicator,
-    triggerPingAnimation,
+    updateSyncIndicator,
+    triggerBroadcastPing,
+    triggerSyncPing,
     initializeHeaderControls
 };
 
@@ -226,10 +343,14 @@ export {
 export default {
     startBroadcasting,
     stopBroadcasting,
+    startSyncing,
+    stopSyncing,
     getUserType,
     setUserType,
     updateBroadcastIndicator,
-    triggerPingAnimation,
+    updateSyncIndicator,
+    triggerBroadcastPing,
+    triggerSyncPing,
     initializeHeaderControls
 };
 
@@ -238,10 +359,14 @@ if (typeof window !== 'undefined') {
     window.HeaderControls = {
         startBroadcasting,
         stopBroadcasting,
+        startSyncing,
+        stopSyncing,
         getUserType,
         setUserType,
         updateBroadcastIndicator,
-        triggerPingAnimation
+        updateSyncIndicator,
+        triggerBroadcastPing,
+        triggerSyncPing
     };
 }
 

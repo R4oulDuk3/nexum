@@ -559,9 +559,10 @@ function createMarkerElement(entityType, location, isUser = false) {
  * @param {maplibregl.Map} map - The MapLibre map instance
  * @param {Array<Object>} locations - Array of location objects
  * Each location should have: {entity_id, entity_type, created_at, position: {lat, lon}, metadata}
+ * @returns {Object} Update result with removedCount and addedCount
  */
 export function clearAndSetMarkers(map, locations = []) {
-    console.log('🔍 DEBUG - clearAndSetMarkers called with', locations.length, 'locations');
+    console.log('[MapMarkers] clearAndSetMarkers called with', locations.length, 'locations');
     
     const store = ensureMarkerStore(map);
     const entityMarkers = store.entityMarkers;
@@ -572,12 +573,15 @@ export function clearAndSetMarkers(map, locations = []) {
     
     // Step 1: Get current keys from map
     const currentKeys = new Set(entityMarkers.keys());
+    console.log(`[MapMarkers] Current markers on map: ${currentKeys.size}`);
     
     // Step 2: Get new keys from location list
     const newKeys = new Set(locations.map(loc => getLocationKey(loc)));
+    console.log(`[MapMarkers] New markers to show: ${newKeys.size}`);
     
     // Step 3: Find keys to remove (in current but not in new)
     const keysToRemove = [...currentKeys].filter(key => !newKeys.has(key));
+    console.log(`[MapMarkers] Markers to remove: ${keysToRemove.length}`);
     
     // Step 4: Find keys to add (in new but not in current)
     const keysToAdd = new Set(
@@ -585,13 +589,25 @@ export function clearAndSetMarkers(map, locations = []) {
             .map(loc => getLocationKey(loc))
             .filter(key => !currentKeys.has(key))
     );
+    console.log(`[MapMarkers] Markers to add: ${keysToAdd.size}`);
+    
+    // Count what will be added by entity type
+    const toAddByType = {};
+    locations.forEach(location => {
+        const key = getLocationKey(location);
+        if (keysToAdd.has(key)) {
+            toAddByType[location.entity_type] = (toAddByType[location.entity_type] || 0) + 1;
+        }
+    });
+    console.log(`[MapMarkers] Markers to add by entity type:`, toAddByType);
     
     // Step 5: Remove markers that are no longer in the list
+    let removedCount = 0;
     keysToRemove.forEach(key => {
         const marker = entityMarkers.get(key);
         if (marker && typeof marker.remove === 'function') {
             marker.remove();
-            console.log('🔍 DEBUG - Removed marker:', key);
+            removedCount++;
         }
         entityMarkers.delete(key);
     });
@@ -606,6 +622,8 @@ export function clearAndSetMarkers(map, locations = []) {
     }
     
     // Step 6: Add new markers
+    let addedCount = 0;
+    const addedByType = {};
     locations.forEach(location => {
         const key = getLocationKey(location);
         
@@ -628,6 +646,10 @@ export function clearAndSetMarkers(map, locations = []) {
             // Store in WeakMap
             entityMarkers.set(key, marker);
             
+            // Track what was added
+            addedCount++;
+            addedByType[location.entity_type] = (addedByType[location.entity_type] || 0) + 1;
+            
             // If this is the user's location, also store as userMarker
             if (isUser) {
                 // Remove old user marker if exists
@@ -635,17 +657,27 @@ export function clearAndSetMarkers(map, locations = []) {
                     store.userMarker.remove();
                 }
                 store.userMarker = marker;
-                console.log('🔍 DEBUG - Added user marker:', key);
-            } else {
-                console.log('🔍 DEBUG - Added marker:', key, location.entity_type);
+                console.log(`[MapMarkers] Added user marker: ${key}`);
             }
         }
     });
     
-    console.log('🔍 DEBUG - Marker update complete. Removed:', keysToRemove.length, 'Added:', keysToAdd.size);
+    console.log(`[MapMarkers] Marker update complete:`);
+    console.log(`[MapMarkers]   - Removed: ${removedCount}`);
+    console.log(`[MapMarkers]   - Added: ${addedCount}`);
+    console.log(`[MapMarkers]   - Added by type:`, addedByType);
     if (userLocation) {
-        console.log('🔍 DEBUG - User location found and tracked');
+        console.log(`[MapMarkers]   - User location found and tracked`);
     }
+    
+    // Return result for caller to use
+    return {
+        removedCount,
+        addedCount,
+        addedByType,
+        totalBefore: currentKeys.size,
+        totalAfter: entityMarkers.size
+    };
 }
 
 /**
@@ -655,6 +687,11 @@ export function clearAndSetMarkers(map, locations = []) {
  * @returns {Promise<void>}
  */
 export async function refreshMapMarkers(map, mapId = 'default') {
+    const refreshStartTime = Date.now();
+    console.log(`[MapRefresh] ========================================`);
+    console.log(`[MapRefresh] Refresh triggered for map: ${mapId} at ${new Date(refreshStartTime).toLocaleTimeString()}`);
+    console.log(`[MapRefresh] ========================================`);
+    
     try {
         // Import modules dynamically to avoid circular dependencies
         const { getMapConfig } = await import('./map-config.js');
@@ -662,18 +699,55 @@ export async function refreshMapMarkers(map, mapId = 'default') {
         
         // Get map config (may be null if not exists)
         const config = await getMapConfig(mapId);
+        console.log(`[MapRefresh] Configuration loaded:`, config);
+        
         // If no config, show all types
         const entityTypes = config ? (config.entity_types_to_show || []) : ['responder', 'civilian', 'incident', 'resource', 'hazard'];
+        console.log(`[MapRefresh] Entity types to show (${entityTypes.length}):`, entityTypes);
         
         // Get latest locations filtered by selected entity types
+        console.log(`[MapRefresh] Fetching latest locations from IndexedDB...`);
         const locations = await getLatestLocations(entityTypes);
+        console.log(`[MapRefresh] Locations read from IndexedDB: ${locations.length} total`);
         
-        // Update map markers
-        clearAndSetMarkers(map, locations);
+        // Count locations by entity type
+        const locationsByType = {};
+        locations.forEach(loc => {
+            locationsByType[loc.entity_type] = (locationsByType[loc.entity_type] || 0) + 1;
+        });
+        console.log(`[MapRefresh] Locations by entity type:`, locationsByType);
         
-        console.log('🔍 DEBUG - Map refreshed with', locations.length, 'locations');
+        // Get current marker count before update
+        const store = ensureMarkerStore(map);
+        const currentMarkerCount = store.entityMarkers ? store.entityMarkers.size : 0;
+        console.log(`[MapRefresh] Current markers on map: ${currentMarkerCount}`);
+        
+        // Update map markers (this will log add/delete details)
+        console.log(`[MapRefresh] Updating map markers...`);
+        const updateResult = clearAndSetMarkers(map, locations);
+        
+        // Get marker count after update
+        const newMarkerCount = store.entityMarkers ? store.entityMarkers.size : 0;
+        const addedCount = newMarkerCount - currentMarkerCount + (updateResult?.removedCount || 0);
+        const removedCount = updateResult?.removedCount || 0;
+        
+        const refreshDuration = Date.now() - refreshStartTime;
+        console.log(`[MapRefresh] ========================================`);
+        console.log(`[MapRefresh] Refresh Summary:`);
+        console.log(`[MapRefresh]   - Config: ${JSON.stringify(config || {})}`);
+        console.log(`[MapRefresh]   - Entity types shown: ${entityTypes.join(', ')}`);
+        console.log(`[MapRefresh]   - Locations read: ${locations.length}`);
+        console.log(`[MapRefresh]   - Locations by type: ${JSON.stringify(locationsByType)}`);
+        console.log(`[MapRefresh]   - Markers before: ${currentMarkerCount}`);
+        console.log(`[MapRefresh]   - Markers to add: ${addedCount}`);
+        console.log(`[MapRefresh]   - Markers to remove: ${removedCount}`);
+        console.log(`[MapRefresh]   - Markers after: ${newMarkerCount}`);
+        console.log(`[MapRefresh]   - Duration: ${refreshDuration}ms`);
+        console.log(`[MapRefresh] ========================================`);
+        
     } catch (error) {
-        console.error('Error refreshing map markers:', error);
+        const refreshDuration = Date.now() - refreshStartTime;
+        console.error(`[MapRefresh] Error refreshing map markers after ${refreshDuration}ms:`, error);
         throw error;
     }
 }
