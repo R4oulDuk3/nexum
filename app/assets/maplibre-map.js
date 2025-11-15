@@ -432,6 +432,53 @@ function getUserId() {
 }
 
 /**
+ * Format timestamp for display in markers
+ * Returns relative time if < 1 hour (e.g., "30m ago"), or formatted time if >= 1 hour (e.g., "19:46")
+ * @param {number|string|Date} timestamp - Timestamp in milliseconds or Date object
+ * @returns {string} Formatted time string
+ */
+function formatTimeForMarker(timestamp) {
+    try {
+        let timestampMs;
+        if (typeof timestamp === 'number') {
+            timestampMs = timestamp;
+        } else if (timestamp instanceof Date) {
+            timestampMs = timestamp.getTime();
+        } else {
+            timestampMs = new Date(timestamp).getTime();
+        }
+        
+        // Check if timestamp is valid
+        if (isNaN(timestampMs)) {
+            return 'Unknown';
+        }
+        
+        const now = Date.now();
+        const diffMs = now - timestampMs;
+        const diffSeconds = Math.floor(diffMs / 1000);
+        const diffMinutes = Math.floor(diffSeconds / 60);
+        const diffHours = Math.floor(diffMinutes / 60);
+        
+        // Less than 1 hour: return relative time like "30m ago"
+        if (diffMinutes < 60) {
+            if (diffSeconds < 60) {
+                return 'Just now';
+            }
+            return `${diffMinutes}m ago`;
+        }
+        
+        // 1 hour or more: return formatted time like "19:46"
+        const date = new Date(timestampMs);
+        const hours = date.getHours().toString().padStart(2, '0');
+        const minutes = date.getMinutes().toString().padStart(2, '0');
+        return `${hours}:${minutes}`;
+    } catch (error) {
+        console.warn('Error formatting time for marker:', error);
+        return 'Unknown';
+    }
+}
+
+/**
  * Create marker element based on entity type
  * If isUser is true, uses user.png regardless of entity type
  * @param {string} entityType - Type of entity (responder, civilian, incident, resource, hazard)
@@ -491,23 +538,59 @@ function createMarkerElement(entityType, location, isUser = false) {
     
     container.appendChild(icon);
     
-    // Created at timestamp below icon
+    // Combined time and name label - displayed below icon with background
+    // Format: "(30m ago) name..." or "(19:46) name..."
     if (location.created_at) {
-        const timestamp = document.createElement('div');
-        timestamp.style.fontSize = '10px';
-        timestamp.style.color = '#666';
-        timestamp.style.marginTop = '2px';
-        timestamp.style.textAlign = 'center';
-        timestamp.style.whiteSpace = 'nowrap';
+        const labelWrapper = document.createElement('div');
+        labelWrapper.style.marginTop = '2px';
+        labelWrapper.style.padding = '2px 4px';
+        labelWrapper.style.backgroundColor = 'rgba(255, 255, 255, 0.9)';
+        labelWrapper.style.borderRadius = '3px';
+        labelWrapper.style.boxShadow = '0 1px 3px rgba(0, 0, 0, 0.2)';
+        labelWrapper.style.maxWidth = '100px';
+        labelWrapper.style.display = 'inline-block';
         
-        const date = new Date(location.created_at);
-        const timeStr = date.toLocaleTimeString('en-US', { 
-            hour: '2-digit', 
-            minute: '2-digit',
-            hour12: false 
-        });
-        timestamp.textContent = timeStr;
-        container.appendChild(timestamp);
+        const labelText = document.createElement('div');
+        labelText.style.fontSize = '9px';
+        labelText.style.color = '#333';
+        labelText.style.textAlign = 'center';
+        labelText.style.whiteSpace = 'nowrap';
+        labelText.style.fontWeight = '500';
+        labelText.style.overflow = 'hidden';
+        labelText.style.textOverflow = 'ellipsis';
+        
+        // Format: "(time) name" or just "(time)" if no name
+        const timeStr = formatTimeForMarker(location.created_at);
+        const nameStr = location.metadata && location.metadata.name 
+            ? ` ${location.metadata.name}` 
+            : '';
+        labelText.textContent = `(${timeStr})${nameStr}`;
+        
+        labelWrapper.appendChild(labelText);
+        container.appendChild(labelWrapper);
+    } else if (location.metadata && location.metadata.name) {
+        // Only show name if there's no timestamp
+        const nameWrapper = document.createElement('div');
+        nameWrapper.style.marginTop = '2px';
+        nameWrapper.style.padding = '2px 4px';
+        nameWrapper.style.backgroundColor = 'rgba(255, 255, 255, 0.9)';
+        nameWrapper.style.borderRadius = '3px';
+        nameWrapper.style.boxShadow = '0 1px 3px rgba(0, 0, 0, 0.2)';
+        nameWrapper.style.maxWidth = '100px';
+        nameWrapper.style.display = 'inline-block';
+        
+        const nameLabel = document.createElement('div');
+        nameLabel.style.fontSize = '9px';
+        nameLabel.style.color = '#333';
+        nameLabel.style.textAlign = 'center';
+        nameLabel.style.whiteSpace = 'nowrap';
+        nameLabel.style.fontWeight = '500';
+        nameLabel.style.overflow = 'hidden';
+        nameLabel.style.textOverflow = 'ellipsis';
+        nameLabel.textContent = location.metadata.name;
+        
+        nameWrapper.appendChild(nameLabel);
+        container.appendChild(nameWrapper);
     }
     
     el.appendChild(container);

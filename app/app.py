@@ -95,8 +95,10 @@ app.config['SWAGGER'] = {
 # Register blueprints FIRST (before Swagger initialization)
 from routes.location_routes import location_bp, _apispec
 from routes.sync_routes import sync_bp
+from routes.scenario_routes import scenario_bp
 app.register_blueprint(location_bp)
 app.register_blueprint(sync_bp)
+app.register_blueprint(scenario_bp)
 
 # Register Raster Tiles blueprint (PNG/JPEG)
 from routes.raster_tiles_routes import raster_tiles_bp

@@ -132,7 +132,7 @@ def add_location():
         data = location_request_schema.load(request.json)
         
         # Use provided node_id or get from cluster service
-        node_id = data.get('node_id') or cluster_service.get_current_node_id()
+        node_id = cluster_service.get_current_node_id()
         
         # Marshmallow already deserializes UUID fields to UUID objects
         # So data['entity_id'] is already a UUID object, not a string
