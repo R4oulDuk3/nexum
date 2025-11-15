@@ -180,26 +180,42 @@ def get_interface_ip(interface_name):
 
 def get_access_point_ip():
     """Get the IP address of the access point interface (wlan1 or bridge)"""
+    # Mesh interfaces that should NOT be used for AP access
+    mesh_interfaces = {'wlan0', 'wlan1', 'bat0', 'lo'}
+    
     # Try to find the AP IP address in this order:
-    # 1. br-ap (bridge interface for AP)
-    # 2. wlan1 (AP interface)
-    # 3. Any interface starting with 'ap' or 'br'
+    # 1. br-ap (bridge interface for AP - this is what clients should use)
+    # 2. Other bridge interfaces (br0, br1, etc.)
+    # 3. wlan1 (AP interface, but may not have IP if bridged)
+    # 4. Other wlan interfaces that aren't wlan0 (the mesh interface)
     
-    interfaces_to_check = ['br-ap', 'br0', 'wlan1', 'wlan0', 'bat0']
+    # Priority order for AP interfaces
+    ap_priority_interfaces = ['br-ap', 'br0', 'br1', 'wlan1']
     
-    for iface in interfaces_to_check:
+    for iface in ap_priority_interfaces:
         ip = get_interface_ip(iface)
         if ip:
             return ip, iface
     
-    # Check all interfaces for bridge or AP-like names
+    # Check all interfaces for bridge or AP-like names (excluding mesh interfaces)
     if NETIFACES_AVAILABLE:
         try:
+            # First, check bridge interfaces
             for iface in netifaces.interfaces():
-                if iface.startswith(('br-', 'ap', 'wlan')):
+                if iface.startswith('br-') and iface not in mesh_interfaces:
                     ip = get_interface_ip(iface)
                     if ip:
                         return ip, iface
+            
+            # Then check other AP-like interfaces (but exclude wlan0 which is mesh)
+            for iface in netifaces.interfaces():
+                if (iface.startswith('br') or 
+                    (iface.startswith('wlan') and iface != 'wlan0') or
+                    iface.startswith('ap')):
+                    if iface not in mesh_interfaces:
+                        ip = get_interface_ip(iface)
+                        if ip:
+                            return ip, iface
         except Exception:
             pass
     else:
@@ -212,24 +228,39 @@ def get_access_point_ip():
                 timeout=2
             )
             if result.returncode == 0:
+                # First pass: find bridge interfaces
                 for line in result.stdout.split('\n'):
-                    if ': ' in line and (line.startswith(' ') or line.startswith('2:')):
-                        # Extract interface name from line like "2: wlan1: ..."
+                    if ': ' in line:
                         parts = line.split(':')
                         if len(parts) >= 2:
-                            iface = parts[1].strip()
-                            if iface.startswith(('br-', 'ap', 'wlan')):
+                            iface = parts[1].strip().split('@')[0]
+                            if iface.startswith('br-') and iface not in mesh_interfaces:
+                                ip = get_interface_ip(iface)
+                                if ip:
+                                    return ip, iface
+                
+                # Second pass: find other AP interfaces (but exclude wlan0)
+                for line in result.stdout.split('\n'):
+                    if ': ' in line:
+                        parts = line.split(':')
+                        if len(parts) >= 2:
+                            iface = parts[1].strip().split('@')[0]
+                            if ((iface.startswith('br') or 
+                                 (iface.startswith('wlan') and iface != 'wlan0') or
+                                 iface.startswith('ap')) and 
+                                iface not in mesh_interfaces):
                                 ip = get_interface_ip(iface)
                                 if ip:
                                     return ip, iface
         except Exception:
             pass
     
-    # Fallback: get the first non-loopback IPv4 address
+    # Last resort fallback: get the first non-loopback IPv4 address (excluding mesh)
+    # but only if no AP interface was found
     if NETIFACES_AVAILABLE:
         try:
             for iface in netifaces.interfaces():
-                if iface == 'lo':
+                if iface in mesh_interfaces:
                     continue
                 ip = get_interface_ip(iface)
                 if ip and not ip.startswith('127.'):
@@ -237,7 +268,7 @@ def get_access_point_ip():
         except Exception:
             pass
     else:
-        # Use ip addr show to find first non-loopback IP
+        # Use ip addr show to find first non-loopback IP (excluding mesh interfaces)
         try:
             result = subprocess.run(
                 ['ip', 'addr', 'show'],
@@ -254,10 +285,10 @@ def get_access_point_ip():
                         if len(parts) >= 2:
                             current_iface = parts[1].strip().split('@')[0]
                     elif 'inet ' in line and current_iface and '127.' not in line:
-                        parts = line.strip().split()
-                        if len(parts) >= 2:
-                            ip = parts[1].split('/')[0]
-                            if current_iface != 'lo':
+                        if current_iface not in mesh_interfaces:
+                            parts = line.strip().split()
+                            if len(parts) >= 2:
+                                ip = parts[1].split('/')[0]
                                 return ip, current_iface
         except Exception:
             pass
