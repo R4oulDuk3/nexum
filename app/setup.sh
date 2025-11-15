@@ -33,6 +33,10 @@ pip install -r requirements.txt
 echo "Ensuring requests library is installed..."
 pip install "requests>=2.31.0"
 
+# Ensure flask-marshmallow and marshmallow are installed (required for API schemas)
+echo "Ensuring flask-marshmallow and marshmallow libraries are installed..."
+pip install "flask-marshmallow>=0.15.0" "marshmallow>=3.20.1"
+
 # Create data directory
 mkdir -p data
 

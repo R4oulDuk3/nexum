@@ -39,6 +39,22 @@ if ($LASTEXITCODE -ne 0) {
     exit 1
 }
 
+# Ensure requests is installed (required for sync service)
+Write-Host "Ensuring requests library is installed..." -ForegroundColor Cyan
+pip install "requests>=2.31.0"
+
+if ($LASTEXITCODE -ne 0) {
+    Write-Host "Warning: Failed to install requests library" -ForegroundColor Yellow
+}
+
+# Ensure flask-marshmallow and marshmallow are installed (required for API schemas)
+Write-Host "Ensuring flask-marshmallow and marshmallow libraries are installed..." -ForegroundColor Cyan
+pip install "flask-marshmallow>=0.15.0" "marshmallow>=3.20.1"
+
+if ($LASTEXITCODE -ne 0) {
+    Write-Host "Warning: Failed to install flask-marshmallow or marshmallow libraries" -ForegroundColor Yellow
+}
+
 # Create data directory
 if (-not (Test-Path "data")) {
     Write-Host "Creating data directory..." -ForegroundColor Cyan
