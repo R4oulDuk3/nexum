@@ -1,0 +1,124 @@
+{% extends "base.html" %}
+
+{% block title %}Messaging - Nexum Mesh Messaging{% endblock %}
+
+{% block extra_css %}
+<style>
+#message-log {
+height: 60vh;
+min-height: 300px;
+overflow-y: auto;
+border: 2px solid #e5e7eb;
+border-radius: 8px;
+padding: 1rem;
+background: #ffffff;
+}
+
+
+.message-button {
+width: 100%;
+padding: 1rem;
+margin-bottom: 0.75rem;
+border-radius: 8px;
+background-color: #1f2937;
+color: white;
+font-weight: 600;
+cursor: pointer;
+text-align: center;
+transition: background 0.2s;
+}
+
+
+.message-button:hover {
+background-color: #374151;
+}
+</style>
+{% endblock %}
+
+
+{% block content %}
+<div class="px-4 py-6 sm:px-0">
+<div class="mb-6">
+<h2 class="text-3xl font-bold text-gray-900">Messaging Center</h2>
+<p class="mt-2 text-sm text-gray-600">View incoming messages and send quick predefined responses.</p>
+</div>
+
+
+<div class="grid grid-cols-1 lg:grid-cols-3 gap-6">
+<!-- Message Log -->
+<div class="lg:col-span-2">
+<div class="bg-white shadow rounded-lg p-4">
+<h3 class="text-xl font-semibold mb-3">Message Log</h3>
+<div id="message-log"></div>
+</div>
+</div>
+
+
+<!-- Quick Message Buttons -->
+<div>
+<div class="bg-white shadow rounded-lg p-4">
+<h3 class="text-xl font-semibold mb-3">Quick Send</h3>
+<button class="message-button" data-msg="Affirmative">Affirmative</button>
+<button class="message-button" data-msg="Negative">Negative</button>
+<button class="message-button" data-msg="All Clear">All Clear</button>
+<button class="message-button" data-msg="Require Assistance">Require Assistance</button>
+<button class="message-button" data-msg="On My Way">On My Way</button>
+<button class="message-button" data-msg="Fall Back">Fall Back</button>
+</div>
+</div>
+</div>
+</div>
+{% endblock %}
+
+{% block extra_js %}
+<script type="module">
+async function fetchMessages() {
+try {
+const response = await fetch('/api/messages');
+const messages = await response.json();
+
+
+const log = document.getElementById('message-log');
+log.innerHTML = '';
+
+
+messages.forEach(msg => {
+const item = document.createElement('div');
+item.className = 'mb-3 p-3 border rounded bg-gray-50';
+item.innerHTML = `
+<div class="text-sm text-gray-500">${msg.timestamp}</div>
+<div class="text-gray-800 font-medium">${msg.sender}</div>
+<div>${msg.content}</div>
+`;
+log.appendChild(item);
+});
+} catch (err) {
+console.error('Failed to fetch messages:', err);
+}
+}
+
+
+async function sendQuickMessage(content) {
+try {
+await fetch('/api/send_message', {
+method: 'POST',
+headers: { 'Content-Type': 'application/json' },
+body: JSON.stringify({ message: content })
+});
+} catch (err) {
+console.error('Failed to send quick message:', err);
+}
+}
+
+
+document.querySelectorAll('.message-button').forEach(btn => {
+btn.addEventListener('click', () => {
+sendQuickMessage(btn.dataset.msg);
+});
+});
+
+
+fetchMessages();
+setInterval(fetchMessages, 5000);
+</script>
+{% endblock %}
