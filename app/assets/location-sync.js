@@ -30,11 +30,13 @@ export async function fetchNodeList() {
  * Fetch location data from a specific node since a timestamp
  * @param {string} nodeId - Node ID (MAC address)
  * @param {number} sinceTimestamp - UTC milliseconds timestamp
+ * @param {number} untilTimestamp - UTC milliseconds timestamp (optional, defaults to current time)
  * @returns {Promise<Array>} Array of location reports
  */
-export async function fetchNodeData(nodeId, sinceTimestamp) {
+export async function fetchNodeData(nodeId, sinceTimestamp, untilTimestamp) {
     try {
-        const response = await SyncService.getApiSyncNodeData(nodeId, sinceTimestamp);
+        const until = untilTimestamp !== undefined ? untilTimestamp : Date.now();
+        const response = await SyncService.getApiSyncNodeData(nodeId, sinceTimestamp, until);
         return response.data || [];
     } catch (error) {
         console.error(`Error fetching data from node ${nodeId}:`, error);
@@ -70,7 +72,7 @@ export async function syncWithNode(nodeId) {
         
         // Fetch data from node
         console.log(`[LocationSync] Node ${nodeId}: Fetching data since timestamp ${fromTimestamp}...`);
-        const locations = await fetchNodeData(nodeId, fromTimestamp);
+        const locations = await fetchNodeData(nodeId, fromTimestamp, now);
         console.log(`[LocationSync] Node ${nodeId}: Received ${locations.length} location(s)`);
         
         if (locations.length === 0) {
@@ -214,18 +216,10 @@ export async function deepSyncWithNode(nodeId, startTime, endTime) {
     try {
         const now = Date.now();
         
-        // Force fetch all data from startTime (ignore last_sync_time)
+        // Force fetch all data from startTime to endTime
         console.log(`[LocationSync] Deep sync Node ${nodeId}: Fetching all data from ${new Date(startTime).toISOString()} to ${new Date(endTime).toISOString()}...`);
-        const allLocations = await fetchNodeData(nodeId, startTime);
-        console.log(`[LocationSync] Deep sync Node ${nodeId}: Received ${allLocations.length} location(s) since startTime`);
-        
-        // Filter to only include data within [startTime, endTime] range
-        const locations = allLocations.filter(loc => {
-            const createdAt = typeof loc.created_at === 'string' ? new Date(loc.created_at).getTime() : loc.created_at;
-            return createdAt >= startTime && createdAt <= endTime;
-        });
-        
-        console.log(`[LocationSync] Deep sync Node ${nodeId}: Filtered to ${locations.length} location(s) in time range`);
+        const locations = await fetchNodeData(nodeId, startTime, endTime);
+        console.log(`[LocationSync] Deep sync Node ${nodeId}: Received ${locations.length} location(s) in time range`);
         
         if (locations.length === 0) {
             // Update sync time even if no data in range

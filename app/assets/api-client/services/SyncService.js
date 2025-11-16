@@ -55,19 +55,24 @@ export class SyncService {
      * Retrieve location data for a specific node that is newer than the specified timestamp
      * @param nodeId Node ID (MAC address)
      * @param since UTC milliseconds timestamp (optional, defaults to 0)
+     * @param until UTC milliseconds timestamp (optional, defaults to current time)
      * @returns any Data retrieved successfully
      * @throws ApiError
      */
-    static getApiSyncNodeData(nodeId, since) {
+    static getApiSyncNodeData(nodeId, since, until) {
+        const query = {
+            'since': since,
+        };
+        if (until !== undefined) {
+            query['until'] = until;
+        }
         return __request(OpenAPI, {
             method: 'GET',
             url: '/api/sync/node/{node_id}/data',
             path: {
                 'node_id': nodeId,
             },
-            query: {
-                'since': since,
-            },
+            query: query,
             errors: {
                 400: `Invalid parameter`,
                 500: `Server error`,

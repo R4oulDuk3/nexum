@@ -7,8 +7,6 @@ from flasgger import swag_from
 from marshmallow import ValidationError
 from apispec import APISpec
 from apispec.ext.marshmallow import MarshmallowPlugin
-from uuid import UUID
-from datetime import datetime, timezone
 import sys
 from pathlib import Path
 
@@ -131,25 +129,13 @@ def add_location():
         
         data = location_request_schema.load(request.json)
         
-        # Use provided node_id or get from cluster service
-        node_id = cluster_service.get_current_node_id()
-        
-        # Marshmallow already deserializes UUID fields to UUID objects
-        # So data['entity_id'] is already a UUID object, not a string
-        entity_id = data['entity_id']
-        if isinstance(entity_id, str):
-            entity_id = UUID(entity_id)
-        
-        # Get created_at from request if provided, otherwise use None (will default to now())
-        created_at = data.get('created_at')
-        
         report = LocationReport.create_new(
             entity_type=EntityType(data['entity_type']),
-            entity_id=entity_id,
-            node_id=node_id,
+            entity_id=data['entity_id'],
+            node_id=cluster_service.get_current_node_id(),
             position=GeoLocation.from_dict(data['position']),
             metadata=data.get('metadata', {}),
-            created_at=created_at
+            created_at=data.get('created_at')
         )
         
         location_service.add_location(report)
@@ -260,12 +246,6 @@ def add_locations_batch():
         
         locations = request.json['locations']
         
-        if not isinstance(locations, list):
-            return jsonify({
-                'status': 'error',
-                'message': '"locations" must be an array'
-            }), 400
-        
         if len(locations) == 0:
             return jsonify({
                 'status': 'error',
@@ -278,17 +258,13 @@ def add_locations_batch():
                 'message': f'Batch size too large. Maximum 1000 locations, got {len(locations)}'
             }), 400
         
-        # Use provided node_id or get from cluster service
         node_id = request.json.get('node_id') or cluster_service.get_current_node_id()
         
-        # Process locations
         reports = []
         errors = []
-        now_ms = int(datetime.now(timezone.utc).timestamp() * 1000)
         
         for idx, location_data in enumerate(locations):
             try:
-                # Validate individual location
                 errors_validate = location_request_schema.validate(location_data)
                 if errors_validate:
                     errors.append(f'Location {idx}: Validation error - {errors_validate}')
@@ -296,24 +272,12 @@ def add_locations_batch():
                 
                 data = location_request_schema.load(location_data)
                 
-                # Handle entity_id (could be UUID string or object)
-                entity_id = data['entity_id']
-                if isinstance(entity_id, str):
-                    entity_id = UUID(entity_id)
-                
-                # Use provided created_at or current time
-                # If created_at is explicitly None or not provided, use current time
-                created_at = data.get('created_at')
-                if created_at is None:
-                    created_at = int(datetime.now(timezone.utc).timestamp() * 1000)
-                
-                # Create LocationReport
                 report = LocationReport.create_new(
                     entity_type=EntityType(data['entity_type']),
-                    entity_id=entity_id,
+                    entity_id=data['entity_id'],
                     node_id=data.get('node_id') or node_id,
                     position=GeoLocation.from_dict(data['position']),
-                    created_at=created_at,
+                    created_at=data.get('created_at'),
                     metadata=data.get('metadata', {})
                 )
                 
@@ -325,17 +289,14 @@ def add_locations_batch():
         
         # Add locations in batch
         if reports:
-            result = location_service.add_locations_batch(reports)
-            created_count = result['created']
-            failed_count = result['failed'] + len(errors)
-            if result.get('errors'):
-                errors.extend(result['errors'])
-            # Get successfully created reports
-            created_reports = reports[:created_count]
+            location_service.add_locations_batch(reports)
+            created_count = len(reports)
+            created_reports = reports
         else:
             created_count = 0
-            failed_count = len(errors)
             created_reports = []
+        
+        failed_count = len(errors)
         
         return jsonify({
             'status': 'success',
@@ -350,304 +311,4 @@ def add_locations_batch():
             'status': 'error',
             'message': f'Server error: {str(e)}'
         }), 500
-
-
-@location_bp.route('/latest', methods=['GET'])
-@swag_from({
-    'tags': ['locations'],
-    'summary': 'Get latest location for each entity',
-    'description': 'Retrieve the most recent location report for each entity',
-    'parameters': [
-        {
-            'name': 'type',
-            'in': 'query',
-            'schema': {
-                'type': 'string',
-                'enum': ['responder', 'civilian', 'incident', 'resource', 'hazard']
-            },
-            'description': 'Filter by entity type (optional)',
-            'required': False
-        },
-        {
-            'name': 'limit',
-            'in': 'query',
-            'schema': {
-                'type': 'integer',
-                'default': 100
-            },
-            'description': 'Maximum number of results (default: 100)',
-            'required': False
-        }
-    ],
-    'responses': {
-        200: {
-            'description': 'Latest locations retrieved successfully',
-            'content': {
-                'application/json': {
-                    'schema': schema_to_dict(LocationListResponseSchema)
-                }
-            }
-        },
-        400: {
-            'description': 'Invalid parameter',
-            'content': {
-                'application/json': {
-                    'schema': {
-                        'type': 'object',
-                        'properties': {
-                            'status': {'type': 'string', 'example': 'error'},
-                            'message': {'type': 'string'}
-                        }
-                    }
-                }
-            }
-        }
-    }
-})
-def get_latest_locations():
-    """Get latest location for each entity"""
-    try:
-        entity_type = request.args.get('type')
-        limit = int(request.args.get('limit', 100))
-        
-        # Print all database tables for debugging (useful for testing)
-        location_service.print_all_database_tables()
-        
-        entity_type_filter = EntityType(entity_type) if entity_type else None
-        reports = location_service.get_latest_locations(entity_type_filter, limit)
-        
-        return jsonify({
-            'status': 'success',
-            'count': len(reports),
-            'data': [r.to_dict() for r in reports]
-        })
-        
-    except ValueError as e:
-        return jsonify({
-            'status': 'error',
-            'message': f'Invalid parameter: {str(e)}'
-        }), 400
-    except Exception as e:
-        return jsonify({
-            'status': 'error',
-            'message': f'Server error: {str(e)}'
-        }), 500
-
-
-@location_bp.route('/history/<entity_id>', methods=['GET'])
-@swag_from({
-    'tags': ['locations'],
-    'summary': 'Get location history for an entity',
-    'description': 'Retrieve location history for a specific entity',
-    'parameters': [
-        {
-            'name': 'entity_id',
-            'in': 'path',
-            'required': True,
-            'schema': {
-                'type': 'string',
-                'format': 'uuid'
-            },
-            'description': 'Entity UUID'
-        },
-        {
-            'name': 'since',
-            'in': 'query',
-            'required': False,
-            'schema': {
-                'type': 'integer'
-            },
-            'description': 'UTC milliseconds timestamp (optional)'
-        },
-        {
-            'name': 'limit',
-            'in': 'query',
-            'required': False,
-            'schema': {
-                'type': 'integer',
-                'default': 100
-            },
-            'description': 'Maximum number of results (default: 100)'
-        }
-    ],
-    'responses': {
-        200: {
-            'description': 'Location history retrieved successfully',
-            'content': {
-                'application/json': {
-                    'schema': schema_to_dict(LocationListResponseSchema)
-                }
-            }
-        },
-        400: {
-            'description': 'Invalid UUID or parameter',
-            'content': {
-                'application/json': {
-                    'schema': {
-                        'type': 'object',
-                        'properties': {
-                            'status': {'type': 'string', 'example': 'error'},
-                            'message': {'type': 'string'}
-                        }
-                    }
-                }
-            }
-        }
-    }
-})
-def get_location_history(entity_id):
-    """Get location history for an entity"""
-    try:
-        since = request.args.get('since', type=int)
-        limit = int(request.args.get('limit', 100))
-        
-        reports = location_service.get_location_history(
-            UUID(entity_id), since, limit
-        )
-        
-        return jsonify({
-            'status': 'success',
-            'entity_id': entity_id,
-            'count': len(reports),
-            'data': [r.to_dict() for r in reports]
-        })
-        
-    except ValueError as e:
-        return jsonify({
-            'status': 'error',
-            'message': f'Invalid UUID or parameter: {str(e)}'
-        }), 400
-    except Exception as e:
-        return jsonify({
-            'status': 'error',
-            'message': f'Server error: {str(e)}'
-        }), 500
-
-
-@location_bp.route('/nearby', methods=['POST'])
-@swag_from({
-    'tags': ['locations'],
-    'summary': 'Find entities near a location',
-    'description': 'Search for entities within a specified radius of a location',
-    'requestBody': {
-        'required': True,
-        'content': {
-            'application/json': {
-                'schema': schema_to_dict(NearbyRequestSchema)
-            }
-        }
-    },
-    'responses': {
-        200: {
-            'description': 'Nearby entities found',
-            'content': {
-            'application/json': {
-                'schema': schema_to_dict(NearbyResponseSchema)
-            }
-            }
-        },
-        400: {
-            'description': 'Invalid request data',
-            'content': {
-                'application/json': {
-                    'schema': {
-                        'type': 'object',
-                        'properties': {
-                            'status': {'type': 'string', 'example': 'error'},
-                            'message': {'type': 'string'}
-                        }
-                    }
-                }
-            }
-        }
-    }
-})
-def get_nearby():
-    """Find entities near a location"""
-    try:
-        # Validate request
-        errors = nearby_request_schema.validate(request.json)
-        if errors:
-            return jsonify({
-                'status': 'error',
-                'message': f'Validation error: {errors}'
-            }), 400
-        
-        data = nearby_request_schema.load(request.json)
-        
-        center = GeoLocation.from_dict(data['center'])
-        radius_km = float(data['radius_km'])
-        entity_type = data.get('entity_type')
-        
-        entity_type_filter = EntityType(entity_type) if entity_type else None
-        reports = location_service.get_nearby_entities(
-            center, radius_km, entity_type_filter
-        )
-        
-        return jsonify({
-            'status': 'success',
-            'center': center.to_dict(),
-            'radius_km': radius_km,
-            'count': len(reports),
-            'data': [r.to_dict() for r in reports]
-        })
-        
-    except (KeyError, ValueError) as e:
-        return jsonify({
-            'status': 'error',
-            'message': f'Invalid request data: {str(e)}'
-        }), 400
-    except Exception as e:
-        return jsonify({
-            'status': 'error',
-            'message': f'Server error: {str(e)}'
-        }), 500
-
-
-@location_bp.route('/types', methods=['GET'])
-@swag_from({
-    'tags': ['locations'],
-    'summary': 'Get list of valid entity types',
-    'description': 'Retrieve all valid entity type values',
-    'responses': {
-        200: {
-            'description': 'List of entity types',
-            'content': {
-            'application/json': {
-                'schema': schema_to_dict(EntityTypesResponseSchema)
-            }
-            }
-        }
-    }
-})
-def get_entity_types():
-    """Get list of valid entity types"""
-    return jsonify({
-        'status': 'success',
-        'data': [e.value for e in EntityType]
-    })
-
-
-@location_bp.route('/node-id', methods=['GET'])
-@swag_from({
-    'tags': ['locations'],
-    'summary': 'Get current node ID',
-    'description': 'Retrieve the ID of the current mesh node',
-    'responses': {
-        200: {
-            'description': 'Current node ID',
-            'content': {
-            'application/json': {
-                'schema': schema_to_dict(NodeIdResponseSchema)
-            }
-            }
-        }
-    }
-})
-def get_node_id():
-    """Get current node ID"""
-    return jsonify({
-        'status': 'success',
-        'node_id': cluster_service.get_current_node_id()
-    })
 
