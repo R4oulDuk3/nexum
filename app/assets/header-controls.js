@@ -54,31 +54,140 @@ function updateBroadcastIndicator() {
     
     if (!indicator) return;
     
-    // Always show broadcasting state (since we auto-start)
-    indicator.classList.remove('bg-green-600', 'hover:bg-green-700', 'bg-red-600', 'hover:bg-red-700');
-    indicator.classList.add('bg-blue-600');
+    const isBroadcasting = headerTracker && headerTracker.isTracking;
     
-    if (indicatorText) {
-        indicatorText.textContent = 'Broadcasting GPS';
+    // Update colors based on state
+    indicator.classList.remove('bg-green-600', 'hover:bg-green-700', 'bg-red-600', 'hover:bg-red-700', 'bg-blue-600');
+    if (isBroadcasting) {
+        indicator.classList.add('bg-blue-600');
+    } else {
+        indicator.classList.add('bg-gray-600');
     }
     
-    // Show pulsing GPS indicator icon
+    if (indicatorText) {
+        indicatorText.textContent = isBroadcasting ? 'Broadcasting GPS' : 'GPS Off';
+    }
+    
+    // Show pulsing GPS indicator icon when broadcasting
     if (icon) {
-        icon.setAttribute('fill', 'none');
-        icon.setAttribute('viewBox', '0 0 24 24');
-        icon.innerHTML = `
-            <circle cx="12" cy="12" r="2" fill="currentColor" opacity="1">
-                <animate attributeName="opacity" values="1;0.6;1" dur="1.5s" repeatCount="indefinite"/>
-            </circle>
-            <circle cx="12" cy="12" r="6" fill="none" stroke="currentColor" stroke-width="1.5" opacity="0.4">
-                <animate attributeName="r" values="6;10;6" dur="1.5s" repeatCount="indefinite"/>
-                <animate attributeName="opacity" values="0.4;0;0.4" dur="1.5s" repeatCount="indefinite"/>
-            </circle>
-            <circle cx="12" cy="12" r="10" fill="none" stroke="currentColor" stroke-width="1" opacity="0.3">
-                <animate attributeName="r" values="10;14;10" dur="1.5s" repeatCount="indefinite" begin="0.25s"/>
-                <animate attributeName="opacity" values="0.3;0;0.3" dur="1.5s" repeatCount="indefinite" begin="0.25s"/>
-            </circle>
-        `;
+        if (isBroadcasting) {
+            icon.setAttribute('fill', 'none');
+            icon.setAttribute('viewBox', '0 0 24 24');
+            icon.innerHTML = `
+                <circle cx="12" cy="12" r="2" fill="currentColor" opacity="1">
+                    <animate attributeName="opacity" values="1;0.6;1" dur="1.5s" repeatCount="indefinite"/>
+                </circle>
+                <circle cx="12" cy="12" r="6" fill="none" stroke="currentColor" stroke-width="1.5" opacity="0.4">
+                    <animate attributeName="r" values="6;10;6" dur="1.5s" repeatCount="indefinite"/>
+                    <animate attributeName="opacity" values="0.4;0;0.4" dur="1.5s" repeatCount="indefinite"/>
+                </circle>
+                <circle cx="12" cy="12" r="10" fill="none" stroke="currentColor" stroke-width="1" opacity="0.3">
+                    <animate attributeName="r" values="10;14;10" dur="1.5s" repeatCount="indefinite" begin="0.25s"/>
+                    <animate attributeName="opacity" values="0.3;0;0.3" dur="1.5s" repeatCount="indefinite" begin="0.25s"/>
+                </circle>
+            `;
+        } else {
+            // Static icon when not broadcasting
+            icon.setAttribute('fill', 'none');
+            icon.setAttribute('stroke', 'currentColor');
+            icon.setAttribute('viewBox', '0 0 24 24');
+            icon.innerHTML = `
+                <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M17.657 16.657L13.414 20.9a1.998 1.998 0 01-2.827 0l-4.244-4.243a8 8 0 1111.314 0z"></path>
+                <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M15 11a3 3 0 11-6 0 3 3 0 016 0z"></path>
+            `;
+        }
+    }
+}
+
+/**
+ * Update GPS broadcast button on dashboard
+ * Shows current state and handles clicks
+ */
+function updateGPSBroadcastButton() {
+    const button = document.getElementById('gps-broadcast-btn');
+    const buttonText = document.getElementById('gps-broadcast-text');
+    const buttonIcon = document.getElementById('gps-broadcast-icon');
+    
+    if (!button) return;
+    
+    const isBroadcasting = headerTracker && headerTracker.isTracking;
+    
+    // Update button appearance
+    button.classList.remove('bg-blue-600', 'bg-green-600', 'bg-red-600', 'hover:bg-blue-700', 'hover:bg-green-700', 'hover:bg-red-700');
+    if (isBroadcasting) {
+        button.classList.add('bg-green-600', 'hover:bg-green-700');
+        if (buttonText) buttonText.textContent = 'Stop GPS Broadcasting';
+    } else {
+        button.classList.add('bg-blue-600', 'hover:bg-blue-700');
+        if (buttonText) buttonText.textContent = 'Start GPS Broadcasting';
+    }
+    
+    // Update icon
+    if (buttonIcon) {
+        if (isBroadcasting) {
+            // Show pulsing icon when broadcasting
+            buttonIcon.setAttribute('fill', 'none');
+            buttonIcon.setAttribute('stroke', 'currentColor');
+            buttonIcon.setAttribute('stroke-width', '2');
+            buttonIcon.setAttribute('viewBox', '0 0 24 24');
+            buttonIcon.innerHTML = `
+                <circle cx="12" cy="12" r="2" fill="currentColor" opacity="1">
+                    <animate attributeName="opacity" values="1;0.6;1" dur="1.5s" repeatCount="indefinite"/>
+                </circle>
+                <circle cx="12" cy="12" r="6" fill="none" stroke="currentColor" stroke-width="1.5" opacity="0.4">
+                    <animate attributeName="r" values="6;10;6" dur="1.5s" repeatCount="indefinite"/>
+                    <animate attributeName="opacity" values="0.4;0;0.4" dur="1.5s" repeatCount="indefinite"/>
+                </circle>
+            `;
+        } else {
+            // Static location icon when not broadcasting
+            buttonIcon.setAttribute('fill', 'none');
+            buttonIcon.setAttribute('stroke', 'currentColor');
+            buttonIcon.setAttribute('stroke-width', '2');
+            buttonIcon.setAttribute('viewBox', '0 0 24 24');
+            buttonIcon.innerHTML = `
+                <path stroke-linecap="round" stroke-linejoin="round" d="M17.657 16.657L13.414 20.9a1.998 1.998 0 01-2.827 0l-4.244-4.243a8 8 0 1111.314 0z"></path>
+                <path stroke-linecap="round" stroke-linejoin="round" d="M15 11a3 3 0 11-6 0 3 3 0 016 0z"></path>
+            `;
+        }
+    }
+}
+
+/**
+ * Handle GPS broadcast button click
+ */
+async function handleGPSBroadcastClick() {
+    const button = document.getElementById('gps-broadcast-btn');
+    if (!button) return;
+    
+    const isBroadcasting = headerTracker && headerTracker.isTracking;
+    
+    // Disable button during state change
+    button.disabled = true;
+    
+    try {
+        if (isBroadcasting) {
+            // Stop broadcasting
+            stopBroadcasting();
+            console.log('GPS broadcasting stopped');
+        } else {
+            // Start broadcasting (will request permission if needed)
+            const started = await startBroadcasting();
+            if (!started) {
+                // Permission denied or error
+                return;
+            }
+            console.log('GPS broadcasting started');
+        }
+        
+        // Update button UI
+        updateGPSBroadcastButton();
+        updateBroadcastIndicator();
+    } catch (error) {
+        console.error('Error toggling GPS broadcast:', error);
+        alert('Error: ' + error.message);
+    } finally {
+        button.disabled = false;
     }
 }
 
@@ -144,46 +253,105 @@ function triggerSyncPing() {
 }
 
 /**
- * Start location broadcasting
- * Auto-starts on app initialization
+ * Get GPS broadcasting state from localStorage
+ * @returns {boolean} True if GPS broadcasting is enabled
  */
-function startBroadcasting() {
+function getGPSBroadcastingState() {
+    const state = localStorage.getItem('gps_broadcasting_enabled');
+    return state === 'true';
+}
+
+/**
+ * Set GPS broadcasting state in localStorage
+ * @param {boolean} enabled - Whether GPS broadcasting is enabled
+ */
+function setGPSBroadcastingState(enabled) {
+    localStorage.setItem('gps_broadcasting_enabled', enabled ? 'true' : 'false');
+}
+
+/**
+ * Start location broadcasting
+ * Requests permission if needed, then starts tracking
+ */
+async function startBroadcasting() {
     if (headerTracker && headerTracker.isTracking) {
         console.log('Broadcasting already started');
-        return;
+        return true;
     }
     
-    // Create or get tracker instance
-    if (!headerTracker) {
-        headerTracker = new LocationTracker(TRACKING_INTERVAL);
+    // Check if geolocation is available
+    if (!navigator.geolocation) {
+        console.error('Geolocation is not supported by your browser');
+        alert('GPS is not supported by your browser');
+        return false;
     }
     
-    // Start tracking with callbacks
-    headerTracker.start(
-        (data) => {
-            // Success callback - trigger ping animation
-            console.log('Location broadcasted:', data);
-            triggerBroadcastPing();
-        },
-        (error) => {
-            // Error callback
-            console.error('Location broadcasting error:', error);
+    // Try to get current position to request permission
+    try {
+        // Request permission by getting position once
+        await new Promise((resolve, reject) => {
+            navigator.geolocation.getCurrentPosition(
+                resolve,
+                reject,
+                { timeout: 5000, maximumAge: 0 }
+            );
+        });
+        
+        // Permission granted, create or get tracker instance
+        if (!headerTracker) {
+            headerTracker = new LocationTracker(TRACKING_INTERVAL);
         }
-    );
-    
-    // Update UI
-    updateBroadcastIndicator();
+        
+        // Start tracking with callbacks
+        headerTracker.start(
+            (data) => {
+                // Success callback - trigger ping animation
+                console.log('Location broadcasted:', data);
+                triggerBroadcastPing();
+            },
+            (error) => {
+                // Error callback
+                console.error('Location broadcasting error:', error);
+            }
+        );
+        
+        // Save state to localStorage
+        setGPSBroadcastingState(true);
+        
+        // Update UI
+        updateBroadcastIndicator();
+        
+        return true;
+    } catch (error) {
+        console.error('Failed to start GPS broadcasting:', error);
+        if (error.code === 1 || error.code === error.PERMISSION_DENIED) {
+            alert('GPS permission denied. Please allow location access to broadcast your position.');
+        } else if (error.code === 2 || error.code === error.POSITION_UNAVAILABLE) {
+            alert('GPS position unavailable. Please check your device settings.');
+        } else if (error.code === 3 || error.code === error.TIMEOUT) {
+            alert('GPS request timed out. Please try again.');
+        } else {
+            alert('Failed to start GPS broadcasting: ' + (error.message || String(error)));
+        }
+        setGPSBroadcastingState(false);
+        return false;
+    }
 }
 
 /**
  * Stop location broadcasting
- * Note: Not typically used since broadcasting auto-starts and is always on
  */
 function stopBroadcasting() {
     if (headerTracker) {
         headerTracker.stop();
         headerTracker = null;
     }
+    
+    // Save state to localStorage
+    setGPSBroadcastingState(false);
+    
+    // Update UI
+    updateBroadcastIndicator();
 }
 
 /**
@@ -252,7 +420,8 @@ function handleUserTypeChange(event) {
 
 /**
  * Initialize header controls
- * Auto-starts broadcasting and syncing when app opens
+ * Auto-starts syncing when app opens
+ * GPS broadcasting is now controlled by button on dashboard
  */
 function initializeHeaderControls() {
     // Initialize user type switch
@@ -263,21 +432,49 @@ function initializeHeaderControls() {
         userTypeSwitch.addEventListener('change', handleUserTypeChange);
     }
     
-    // Initialize broadcast status indicator
+    // Initialize broadcast status indicator (just shows status, no auto-start)
     const broadcastIndicator = document.getElementById('headerBroadcastBtn');
     if (broadcastIndicator) {
-        // Update UI to show broadcasting state
+        // Update UI to show current state
         updateBroadcastIndicator();
         
         // Remove click handler - it's now just an indicator, not a button
         broadcastIndicator.style.cursor = 'default';
         
-        // Auto-start broadcasting when app opens
-        console.log('Auto-starting GPS broadcasting...');
-        // Small delay to ensure everything is loaded
-        setTimeout(() => {
-            startBroadcasting();
-        }, 500);
+        // Restore GPS broadcasting state from localStorage
+        const gpsEnabled = getGPSBroadcastingState();
+        if (gpsEnabled) {
+            console.log('Restoring GPS broadcasting state from localStorage...');
+            // Small delay to ensure everything is loaded
+            setTimeout(() => {
+                startBroadcasting().then(success => {
+                    if (success) {
+                        updateGPSBroadcastButton();
+                        updateBroadcastIndicator();
+                    } else {
+                        // Permission was denied, clear state
+                        setGPSBroadcastingState(false);
+                    }
+                });
+            }, 500);
+        }
+    }
+    
+    // Initialize GPS broadcast button on dashboard
+    const gpsBroadcastButton = document.getElementById('gps-broadcast-btn');
+    if (gpsBroadcastButton) {
+        gpsBroadcastButton.addEventListener('click', handleGPSBroadcastClick);
+        
+        // Restore state from localStorage and update button
+        const gpsEnabled = getGPSBroadcastingState();
+        if (gpsEnabled) {
+            // State will be restored by the broadcast indicator initialization
+            setTimeout(() => {
+                updateGPSBroadcastButton();
+            }, 1000);
+        } else {
+            updateGPSBroadcastButton();
+        }
     }
     
     // Initialize sync status indicator
@@ -334,6 +531,10 @@ export {
     setUserType,
     updateBroadcastIndicator,
     updateSyncIndicator,
+    updateGPSBroadcastButton,
+    handleGPSBroadcastClick,
+    getGPSBroadcastingState,
+    setGPSBroadcastingState,
     triggerBroadcastPing,
     triggerSyncPing,
     initializeHeaderControls
@@ -349,6 +550,10 @@ export default {
     setUserType,
     updateBroadcastIndicator,
     updateSyncIndicator,
+    updateGPSBroadcastButton,
+    handleGPSBroadcastClick,
+    getGPSBroadcastingState,
+    setGPSBroadcastingState,
     triggerBroadcastPing,
     triggerSyncPing,
     initializeHeaderControls
@@ -365,6 +570,10 @@ if (typeof window !== 'undefined') {
         setUserType,
         updateBroadcastIndicator,
         updateSyncIndicator,
+        updateGPSBroadcastButton,
+        handleGPSBroadcastClick,
+        getGPSBroadcastingState,
+        setGPSBroadcastingState,
         triggerBroadcastPing,
         triggerSyncPing
     };

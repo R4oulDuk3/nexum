@@ -33,6 +33,20 @@
         <p class="mt-2 text-sm text-gray-500">View and manage location data from mesh network nodes</p>
     </div>
 
+    <!-- GPS Broadcast Button -->
+    <div class="mb-4 flex justify-center">
+        <button 
+            id="gps-broadcast-btn" 
+            class="px-6 py-3 bg-blue-600 text-white rounded-lg font-medium shadow-sm transition-colors hover:bg-blue-700 disabled:bg-gray-400 disabled:cursor-not-allowed flex items-center gap-2"
+        >
+            <svg id="gps-broadcast-icon" class="w-5 h-5" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24">
+                <path stroke-linecap="round" stroke-linejoin="round" d="M17.657 16.657L13.414 20.9a1.998 1.998 0 01-2.827 0l-4.244-4.243a8 8 0 1111.314 0z"></path>
+                <path stroke-linecap="round" stroke-linejoin="round" d="M15 11a3 3 0 11-6 0 3 3 0 016 0z"></path>
+            </svg>
+            <span id="gps-broadcast-text">Start GPS Broadcasting</span>
+        </button>
+    </div>
+
     <!-- Map Container -->
     <div class="bg-white border border-gray-200 rounded-lg p-4 relative shadow-sm">
         <!-- Status Bar -->
