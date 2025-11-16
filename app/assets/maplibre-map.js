@@ -684,10 +684,10 @@ function removeAllTraces(map) {
         const layers = style.layers || [];
         const sources = Object.keys(style.sources || {});
         
-        // Remove trace layers
+        // Remove trace layers (including arrow layers)
         let removedLayers = 0;
         layers.forEach(layer => {
-            if (layer.id && layer.id.startsWith('trace-layer-')) {
+            if (layer.id && (layer.id.startsWith('trace-layer-') || layer.id.startsWith('trace-arrow-'))) {
                 try {
                     if (map.getLayer(layer.id)) {
                         map.removeLayer(layer.id);
@@ -738,6 +738,73 @@ function getEntityTypeColor(entityType) {
         'hazard': '#a855f7'        // purple
     };
     return colors[entityType] || '#6b7280'; // default gray
+}
+
+/**
+ * Create programmatic arrow icon for MapLibre GL
+ * Arrow points right and is colored based on entity type
+ * @param {maplibregl.Map} map - The MapLibre map instance
+ * @param {string} entityType - Entity type for color
+ * @returns {Promise<boolean>} True if icon was created successfully
+ */
+function createArrowIcon(map, entityType) {
+    return new Promise((resolve, reject) => {
+        try {
+            const iconName = `arrow-icon-${entityType}`;
+            
+            // Check if icon already exists (hasImage may not be available in all versions)
+            try {
+                if (map.hasImage && map.hasImage(iconName)) {
+                    resolve(true);
+                    return;
+                }
+            } catch (e) {
+                // hasImage may not exist, continue to create the icon
+            }
+            
+            const color = getEntityTypeColor(entityType);
+            
+            // Create arrow SVG pointing right
+            // Size: 64x64 viewBox for better quality
+            const svg = `
+                <svg width="64" height="64" viewBox="0 0 64 64" xmlns="http://www.w3.org/2000/svg">
+                    <path d="M 10 32 L 45 32 M 45 32 L 35 22 M 45 32 L 35 42"
+                          stroke="${color}"
+                          stroke-width="4"
+                          fill="none"
+                          stroke-linecap="round"
+                          stroke-linejoin="round"/>
+                </svg>
+            `;
+            
+            // Create image from SVG
+            const img = new Image();
+            img.onload = () => {
+                try {
+                    map.addImage(iconName, img);
+                    console.log(`[Traces] Created arrow icon for entity type: ${entityType}`);
+                    resolve(true);
+                } catch (error) {
+                    // If image already exists, that's fine - resolve anyway
+                    if (error.message && error.message.includes('already exists')) {
+                        console.debug(`[Traces] Arrow icon ${iconName} already exists`);
+                        resolve(true);
+                    } else {
+                        console.error(`[Traces] Error adding arrow icon ${iconName} to map:`, error);
+                        reject(error);
+                    }
+                }
+            };
+            img.onerror = (error) => {
+                console.error(`[Traces] Error loading arrow icon for ${entityType}:`, error);
+                reject(error);
+            };
+            img.src = 'data:image/svg+xml;charset=utf-8,' + encodeURIComponent(svg);
+        } catch (error) {
+            console.error(`[Traces] Error creating arrow icon for ${entityType}:`, error);
+            reject(error);
+        }
+    });
 }
 
 /**
@@ -851,6 +918,42 @@ function drawTraces(map, groupedByEntity, entityTypes = null) {
                     'line-opacity': 0.6,
                     'line-dasharray': [2, 2] // Dotted line
                 }
+            });
+            
+            // Create arrow icon for this entity type (if not already created)
+            createArrowIcon(map, entityType).then(() => {
+                // Add arrow symbol layer after line layer
+                const arrowLayerId = `trace-arrow-${entityId}`;
+                const arrowIconName = `arrow-icon-${entityType}`;
+                
+                try {
+                    // Remove existing arrow layer if it exists
+                    if (map.getLayer(arrowLayerId)) {
+                        map.removeLayer(arrowLayerId);
+                    }
+                    
+                    // Add arrow symbol layer with symbol-placement: 'line'
+                    map.addLayer({
+                        id: arrowLayerId,
+                        type: 'symbol',
+                        source: sourceId,  // Same source as the line
+                        layout: {
+                            'symbol-placement': 'line',  // KEY: Places symbols along the line
+                            'symbol-spacing': 100,        // Distance between arrows (in pixels)
+                            'icon-image': arrowIconName,
+                            'icon-size': 0.5,
+                            'icon-rotation-alignment': 'map',  // Rotate with map (not viewport)
+                            'icon-allow-overlap': false
+                        },
+                        paint: {
+                            'icon-opacity': 0.8
+                        }
+                    });
+                } catch (error) {
+                    console.error(`[Traces] Error adding arrow layer for entity ${entityId}:`, error);
+                }
+            }).catch((error) => {
+                console.error(`[Traces] Error creating arrow icon for entity ${entityId}:`, error);
             });
             
             tracesDrawn++;

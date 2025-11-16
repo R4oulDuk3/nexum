@@ -389,8 +389,8 @@
                     startSyncScheduler();
                     window.stopSyncScheduler = stopSyncScheduler; // Store for cleanup
                     
-                    // Start automatic map refresh every 1 second
-                    console.log('[MapRefresh] Starting automatic map refresh (interval: 1s)');
+                    // Start automatic map refresh every 10 seconds
+                    console.log('[MapRefresh] Starting automatic map refresh (interval: 10s)');
                     let mapRefreshInterval = setInterval(async () => {
                         try {
                             console.log('[MapRefresh] Automatic refresh triggered');
@@ -402,7 +402,7 @@
                         } catch (error) {
                             console.error('[MapRefresh] Error during automatic refresh:', error);
                         }
-                    }, 1000); // 1 second
+                    }, 10000); // 10 seconds
                     
                     // Store interval ID for potential cleanup
                     window.mapRefreshInterval = mapRefreshInterval;

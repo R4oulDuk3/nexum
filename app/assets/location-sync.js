@@ -53,7 +53,7 @@ export async function fetchNodeData(nodeId, sinceTimestamp, untilTimestamp) {
 export async function syncWithNode(nodeId) {
     try {
         const now = Date.now();
-        const syncWindowMs = 5 * 60 * 1000; // 5 minutes in milliseconds
+        const syncWindowMs = 30 * 60 * 1000; // 30 minutes in milliseconds
         
         // Get sync times from Dexie
         const nodeSync = await db.node_sync.get(nodeId);
@@ -453,7 +453,7 @@ export function startSyncScheduler() {
         return;
     }
     
-    console.log('[LocationSync] Starting sync scheduler (every 2s after completion)');
+    console.log('[LocationSync] Starting sync scheduler (every 10s after completion)');
     
     async function runSync() {
         if (isSyncRunning) {
@@ -469,13 +469,13 @@ export function startSyncScheduler() {
             console.error('[LocationSync] Sync scheduler error:', error);
         } finally {
             isSyncRunning = false;
-            // Schedule next sync 2 seconds after this one finishes
+            // Schedule next sync 10 seconds after this one finishes
             scheduleNextSync();
         }
     }
     
     function scheduleNextSync() {
-        syncSchedulerTimeout = setTimeout(runSync, 2000);
+        syncSchedulerTimeout = setTimeout(runSync, 10000); // 10 seconds
     }
     
     // Start first sync immediately
