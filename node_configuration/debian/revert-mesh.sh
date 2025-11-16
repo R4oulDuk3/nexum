@@ -129,9 +129,23 @@ revert_mesh() {
         fi
     done
     
-    # Stop dnsmasq service
+    # Stop dnsmasq service and revert DNS configuration
+    echo "4a. Reverting DNS configuration..."
+    if [ -f /etc/dnsmasq.conf.nexum-backup ]; then
+        echo "   Restoring original dnsmasq.conf from backup..."
+        cp /etc/dnsmasq.conf.nexum-backup /etc/dnsmasq.conf
+        rm -f /etc/dnsmasq.conf.nexum-backup
+        echo "   ✓ DNS configuration restored"
+    elif [ -f /etc/dnsmasq.conf ]; then
+        # Remove nexum DNS entry if backup doesn't exist
+        sed -i '/^# Nexum hostname resolution$/d' /etc/dnsmasq.conf
+        sed -i '/^address=\/nexum\//d' /etc/dnsmasq.conf
+        echo "   ✓ Nexum DNS entry removed"
+    fi
+    
     systemctl stop dnsmasq 2>/dev/null || true
     systemctl disable dnsmasq 2>/dev/null || true
+    echo "   ✓ dnsmasq stopped and disabled"
     
     # Step 5: Reset wireless interfaces (wlan0 for mesh, wlan1 for AP)
     echo "5. Resetting wireless interfaces..."
@@ -191,13 +205,32 @@ revert_mesh() {
         echo "   ✓ Service file removed"
     fi
     
-    # Step 8: Restore iptables (optional - clear mesh rules)
-    echo "8. Clearing mesh iptables rules..."
-    # Note: This clears all iptables rules, not just mesh ones
-    # A more sophisticated version could backup/restore, but this is simpler
-    iptables -t nat -F 2>/dev/null || true
-    iptables -F 2>/dev/null || true
-    echo "   ✓ iptables rules cleared"
+    # Step 8: Remove Nexum port forwarding rules
+    echo "8. Removing Nexum port forwarding rules..."
+    
+    # Remove specific port forwarding rules (80 → 5000)
+    # Try to get bridge IP to remove specific rules
+    BRIDGE_IP=""
+    if ip link show br-ap &>/dev/null; then
+        BRIDGE_IP=$(ip addr show br-ap 2>/dev/null | grep "inet " | awk '{print $2}' | cut -d'/' -f1 || echo "")
+    fi
+    
+    # Remove port forwarding rules
+    iptables -t nat -D PREROUTING -p tcp --dport 80 -j REDIRECT --to-port 5000 2>/dev/null || true
+    iptables -t nat -D OUTPUT -p tcp -d 127.0.0.1 --dport 80 -j REDIRECT --to-port 5000 2>/dev/null || true
+    
+    if [ -n "$BRIDGE_IP" ]; then
+        iptables -t nat -D OUTPUT -p tcp -d "$BRIDGE_IP" --dport 80 -j REDIRECT --to-port 5000 2>/dev/null || true
+    fi
+    
+    # Save iptables rules if iptables-persistent is available
+    if command -v netfilter-persistent &> /dev/null; then
+        netfilter-persistent save 2>/dev/null || true
+    elif [ -d /etc/iptables ]; then
+        iptables-save > /etc/iptables/rules.v4 2>/dev/null || true
+    fi
+    
+    echo "   ✓ Nexum port forwarding rules removed"
     
     # Step 9: Unload batman-adv module (optional)
     echo "9. Unloading batman-adv module..."
