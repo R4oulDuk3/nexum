@@ -275,7 +275,7 @@ class SyncService:
             return reports
         except Exception as e:
             print(f"SyncService: Error pulling data from {peer_ip}: {str(e)}")
-            return []
+            raise e
     
     def save_location_reports(self, reports: List[Dict[str, Any]]) -> Tuple[int, int]:
         """
@@ -355,18 +355,37 @@ class SyncService:
         return [report.to_dict() for report in reports]
 
     
-    def sync_with_all_peers(self):
+    def sync_with_all_peers(self) -> Dict[str, Any]:
         """
         Syncs with all visible peers using forward/backward sync strategy.
         Forward sync: Gets new data from last_forward_sync_at + 30min
         Backward sync: Gets old data from last_backward_sync_at - 30min to last_backward_sync_at
+        
+        Returns:
+            Dictionary with sync statistics:
+            - peers_found: Number of peers discovered
+            - peers_attempted: Number of peers sync was attempted with
+            - peers_synced: Number of peers successfully synced
+            - total_reports_pulled: Total number of reports fetched from peers
+            - total_reports_saved: Total number of reports saved to database
+            - total_reports_skipped: Total number of reports skipped (duplicates)
+            - errors: List of error messages
         """
         peers = self.get_all_peers()
         
         now_ms = int(datetime.now(timezone.utc).timestamp() * 1000)
         thirty_minutes_ms = 30 * 60 * 1000  # 30 minutes in milliseconds
         
-        print(f"SyncService: Starting sync with {len(peers)} peers")
+        # Statistics tracking
+        peers_found = len(peers)
+        peers_attempted = 0
+        peers_synced = 0
+        total_reports_pulled = 0
+        total_reports_saved = 0
+        total_reports_skipped = 0
+        errors = []
+        
+        print(f"SyncService: Starting sync with {peers_found} peers")
         
         # Get all nodes that have location reports but aren't in current peers list
         try:
@@ -386,9 +405,12 @@ class SyncService:
             conn.close()
             
         except Exception as e:
-            print(f"SyncService: Error initializing sync_log entries: {e}")
+            error_msg = f"Error initializing sync_log entries: {e}"
+            print(f"SyncService: {error_msg}")
+            errors.append(error_msg)
         
         for peer_mac, peer_ip in peers.items():
+            peers_attempted += 1
             try:
                 # Get sync times for this peer
                 forward_sync_at, backward_sync_at = self.get_last_sync_times(peer_mac)
@@ -401,8 +423,13 @@ class SyncService:
                 
                 # Save forward sync data and find latest created_at
                 forward_latest = forward_sync_at
+                forward_pulled = len(forward_data)
+                total_reports_pulled += forward_pulled
+                
                 if forward_data:
-                    self.location_service.add_locations_batch(forward_data)
+                    saved, skipped = self.location_service.add_locations_batch(forward_data)
+                    total_reports_saved += saved
+                    total_reports_skipped += skipped
                     
                     # Find latest created_at in forward data
                     for report in forward_data:
@@ -417,8 +444,13 @@ class SyncService:
                 
                 # Save backward sync data and find oldest created_at
                 backward_oldest = backward_sync_at
+                backward_pulled = len(backward_data)
+                total_reports_pulled += backward_pulled
+                
                 if backward_data:
-                    self.location_service.add_locations_batch(backward_data)
+                    saved, skipped = self.location_service.add_locations_batch(backward_data)
+                    total_reports_saved += saved
+                    total_reports_skipped += skipped
                     
                     # Find oldest created_at in backward data
                     for report in backward_data:
@@ -427,10 +459,22 @@ class SyncService:
                             backward_oldest = created_at
                 
                 self.update_sync_times(peer_mac, forward_latest, backward_oldest)
+                peers_synced += 1
                 
             except Exception as e:
                 error_msg = f"Error syncing with {peer_mac} ({peer_ip}): {str(e)}"
                 print(f"SyncService: {error_msg}")
+                errors.append(error_msg)
+        
+        return {
+            'peers_found': peers_found,
+            'peers_attempted': peers_attempted,
+            'peers_synced': peers_synced,
+            'total_reports_pulled': total_reports_pulled,
+            'total_reports_saved': total_reports_saved,
+            'total_reports_skipped': total_reports_skipped,
+            'errors': errors
+        }
     
     def get_sync_log_status(self) -> List[Dict[str, Any]]:
         """

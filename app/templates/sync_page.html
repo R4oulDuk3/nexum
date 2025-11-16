@@ -201,18 +201,39 @@
             }
             
             listEl.innerHTML = statuses.map(status => {
-                const ageMs = status.sync_age_ms || Infinity;
-                const ageMins = Math.floor(ageMs / 60000);
-                const statusClass = ageMs < 60000 ? 'status-success' : 'status-idle';
+                const forwardAgeMs = status.forward_sync_age_ms;
+                const backwardAgeMs = status.backward_sync_age_ms;
+                const forwardAgeMins = forwardAgeMs ? Math.floor(forwardAgeMs / 60000) : null;
+                const backwardAgeMins = backwardAgeMs ? Math.floor(backwardAgeMs / 60000) : null;
+                
+                const forwardStatusClass = forwardAgeMs && forwardAgeMs < 60000 ? 'status-success' : 'status-idle';
+                const backwardStatusClass = backwardAgeMs && backwardAgeMs < 60000 ? 'status-success' : 'status-idle';
+                
+                const forwardTime = status.last_forward_sync_at ? new Date(status.last_forward_sync_at).toLocaleString() : 'Never';
+                const backwardTime = status.last_backward_sync_at ? new Date(status.last_backward_sync_at).toLocaleString() : 'Never';
                 
                 return `
-                    <div class="flex items-center justify-between p-2 bg-gray-50 rounded">
-                        <div>
-                            <span class="status-indicator ${statusClass}"></span>
-                            <span class="text-sm font-medium">${status.node_id}</span>
+                    <div class="p-3 bg-gray-50 rounded mb-2">
+                        <div class="flex items-center justify-between mb-2">
+                            <div class="flex items-center">
+                                <span class="status-indicator ${forwardStatusClass}"></span>
+                                <span class="text-sm font-medium font-mono">${status.node_id}</span>
+                            </div>
+                            <div class="text-sm font-semibold text-gray-700">
+                                ${status.location_count || 0} locations
+                            </div>
                         </div>
-                        <div class="text-sm text-gray-600">
-                            ${status.last_sync_time ? `Last: ${ageMins}m ago` : 'Never synced'}
+                        <div class="grid grid-cols-2 gap-4 mt-2 text-xs text-gray-600">
+                            <div>
+                                <div class="font-medium mb-1">Forward Sync</div>
+                                <div>Last: ${forwardTime}</div>
+                                <div>Age: ${forwardAgeMins !== null ? `${forwardAgeMins}m ago` : 'N/A'}</div>
+                            </div>
+                            <div>
+                                <div class="font-medium mb-1">Backward Sync</div>
+                                <div>Last: ${backwardTime}</div>
+                                <div>Age: ${backwardAgeMins !== null ? `${backwardAgeMins}m ago` : 'N/A'}</div>
+                            </div>
                         </div>
                     </div>
                 `;

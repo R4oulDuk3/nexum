@@ -78,16 +78,12 @@ class SyncScheduler:
                 print(f"🔄 AUTO SYNC CALLED (#{self._sync_count + 1})")
                 print(f"{'='*60}")
                 
-                # Call the /api/sync/test endpoint via HTTP
-                # This uses sync_log for incremental sync (use_sync_log=True by default)
-                sync_url = f"{self.api_url}/api/sync/test"
+                # Call the POST /api/sync endpoint via HTTP
+                sync_url = f"{self.api_url}/api/sync"
                 
                 try:
-                    response = requests.get(
+                    response = requests.post(
                         sync_url,
-                        params={
-                            'use_sync_log': 'true'  # Use incremental sync via sync_log
-                        },
                         timeout=30  # 30 second timeout for sync operation
                     )
                     

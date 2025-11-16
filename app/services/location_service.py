@@ -4,7 +4,7 @@ Location tracking service for disaster relief operations
 
 import sqlite3
 import json
-from typing import List, Optional
+from typing import List, Optional, Tuple
 from uuid import UUID
 from pathlib import Path
 
@@ -64,16 +64,24 @@ class LocationService:
         
         return report
     
-    def add_locations_batch(self, reports: List[LocationReport], use_transaction: bool = True):
+    def add_locations_batch(self, reports: List[LocationReport], use_transaction: bool = True) -> Tuple[int, int]:
         """
         Add multiple location reports in batch
         
         Args:
             reports: List of LocationReport objects to store
             use_transaction: Whether to use a transaction for atomicity (default: True)
+        
+        Returns:
+            Tuple of (saved_count, skipped_count) where:
+            - saved_count: Number of reports successfully saved
+            - skipped_count: Number of reports skipped (duplicates)
         """
         if not reports:
-            return
+            return (0, 0)
+        
+        saved_count = 0
+        skipped_count = 0
         
         conn = sqlite3.connect(self.db_path)
         cursor = conn.cursor()
@@ -101,9 +109,16 @@ class LocationService:
                 report.created_at,
                 json.dumps(report.metadata)
             ))
+            
+            if cursor.rowcount > 0:
+                saved_count += 1
+            else:
+                skipped_count += 1
         
         conn.commit()
         conn.close()
+        
+        return (saved_count, skipped_count)
 
 
     def get_locations_in_range(self, node_id: str, from_timestamp: int, to_timestamp: int) -> List[LocationReport]:

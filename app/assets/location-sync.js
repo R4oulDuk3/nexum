@@ -46,55 +46,101 @@ export async function fetchNodeData(nodeId, sinceTimestamp, untilTimestamp) {
 
 /**
  * Sync locations from a node and write to IndexedDB
+ * Uses forward/backward sync strategy similar to server-side sync
  * @param {string} nodeId - Node ID to sync from
  * @returns {Promise<{success: boolean, count: number, error?: string}>}
  */
 export async function syncWithNode(nodeId) {
     try {
-        // Get last sync time from Dexie
-        const nodeSync = await db.node_sync.get(nodeId);
         const now = Date.now();
-        const threeHoursAgo = now - (3 * 60 * 60 * 1000); // 3 hours in milliseconds
+        const thirtyMinutesMs = 30 * 60 * 1000; // 30 minutes in milliseconds
         
-        // Calculate time range
-        let fromTimestamp;
-        const threeHoursInMs = 3 * 60 * 60 * 1000; // 3 hours in milliseconds
-        if (nodeSync && (now - nodeSync.last_sync_time) < threeHoursInMs) {
-            // Recent sync: get updates since last sync
-            fromTimestamp = nodeSync.last_sync_time;
-            const age = ((now - fromTimestamp) / 1000).toFixed(1);
-            console.log(`[LocationSync] Node ${nodeId}: Using incremental sync (since ${age}s ago)`);
-        } else {
-            // Stale or new: get last 3 hours only
-            fromTimestamp = threeHoursAgo;
-            console.log(`[LocationSync] Node ${nodeId}: Using full sync (last 3 hours)`);
+        // Get sync times from Dexie
+        const nodeSync = await db.node_sync.get(nodeId);
+        let forwardSyncAt = nodeSync?.last_forward_sync_at || 0;
+        let backwardSyncAt = nodeSync?.last_backward_sync_at || now;
+        
+        // Initialize sync times if this is first sync
+        if (!nodeSync) {
+            forwardSyncAt = 0;
+            backwardSyncAt = now;
         }
         
-        // Fetch data from node
-        console.log(`[LocationSync] Node ${nodeId}: Fetching data since timestamp ${fromTimestamp}...`);
-        const locations = await fetchNodeData(nodeId, fromTimestamp, now);
-        console.log(`[LocationSync] Node ${nodeId}: Received ${locations.length} location(s)`);
+        let totalCount = 0;
+        let forwardLatest = forwardSyncAt;
+        let backwardOldest = backwardSyncAt;
         
-        if (locations.length === 0) {
-            // Update sync time even if no new data
+        // Forward sync: Get new data from last_forward_sync_at to last_forward_sync_at + 30min
+        const forwardFrom = forwardSyncAt;
+        const forwardUntil = Math.min(forwardFrom + thirtyMinutesMs, now);
+        
+        console.log(`[LocationSync] Node ${nodeId}: Forward sync from ${new Date(forwardFrom).toISOString()} to ${new Date(forwardUntil).toISOString()}`);
+        const forwardLocations = await fetchNodeData(nodeId, forwardFrom, forwardUntil);
+        console.log(`[LocationSync] Node ${nodeId}: Forward sync received ${forwardLocations.length} location(s)`);
+        
+        if (forwardLocations.length > 0) {
+            // Find latest created_at in forward data
+            for (const loc of forwardLocations) {
+                const createdAt = typeof loc.created_at === 'string' ? new Date(loc.created_at).getTime() : loc.created_at;
+                if (createdAt > forwardLatest) {
+                    forwardLatest = createdAt;
+                }
+            }
+            totalCount += forwardLocations.length;
+        } else {
+            // No new data, update forward sync time to current time
+            forwardLatest = now;
+        }
+        
+        // Backward sync: Get old data from (last_backward_sync_at - 30min) to last_backward_sync_at
+        const backwardFrom = Math.max(0, backwardSyncAt - thirtyMinutesMs);
+        const backwardUntil = backwardSyncAt;
+        
+        console.log(`[LocationSync] Node ${nodeId}: Backward sync from ${new Date(backwardFrom).toISOString()} to ${new Date(backwardUntil).toISOString()}`);
+        const backwardLocations = await fetchNodeData(nodeId, backwardFrom, backwardUntil);
+        console.log(`[LocationSync] Node ${nodeId}: Backward sync received ${backwardLocations.length} location(s)`);
+        
+        if (backwardLocations.length > 0) {
+            // Find oldest created_at in backward data
+            for (const loc of backwardLocations) {
+                const createdAt = typeof loc.created_at === 'string' ? new Date(loc.created_at).getTime() : loc.created_at;
+                if (createdAt < backwardOldest || backwardOldest === backwardSyncAt) {
+                    backwardOldest = createdAt;
+                }
+            }
+            totalCount += backwardLocations.length;
+        } else {
+            // No data in range, keep backward sync time as is
+            backwardOldest = backwardSyncAt;
+        }
+        
+        // Combine all locations
+        const allLocations = [...forwardLocations, ...backwardLocations];
+        
+        if (allLocations.length === 0) {
+            // Update sync times even if no new data
             await db.node_sync.put({
                 node_id: nodeId,
-                last_sync_time: now
+                last_forward_sync_at: forwardLatest,
+                last_backward_sync_at: backwardOldest
             });
-            console.log(`[LocationSync] Node ${nodeId}: No new data, sync time updated`);
+            console.log(`[LocationSync] Node ${nodeId}: No new data, sync times updated`);
             return { success: true, count: 0 };
         }
         
         // Write to IndexedDB in transaction
-        console.log(`[LocationSync] Node ${nodeId}: Writing ${locations.length} location(s) to IndexedDB...`);
+        console.log(`[LocationSync] Node ${nodeId}: Writing ${allLocations.length} location(s) to IndexedDB...`);
         await db.transaction('rw', db.locations, db.latest_locations, db.node_sync, async () => {
             // Write all locations
-            await db.locations.bulkPut(locations);
+            await db.locations.bulkPut(allLocations);
             
             // Update latest_locations cache
-            for (const loc of locations) {
+            for (const loc of allLocations) {
+                const createdAt = typeof loc.created_at === 'string' ? new Date(loc.created_at).getTime() : loc.created_at;
                 const existing = await db.latest_locations.get(loc.entity_id);
-                if (!existing || new Date(loc.created_at) > new Date(existing.created_at)) {
+                const existingCreatedAt = existing ? (typeof existing.created_at === 'string' ? new Date(existing.created_at).getTime() : existing.created_at) : 0;
+                
+                if (!existing || createdAt > existingCreatedAt) {
                     await db.latest_locations.put({
                         ...loc,
                         updated_at: now
@@ -102,15 +148,16 @@ export async function syncWithNode(nodeId) {
                 }
             }
             
-            // Update node sync time
+            // Update node sync times
             await db.node_sync.put({
                 node_id: nodeId,
-                last_sync_time: now
+                last_forward_sync_at: forwardLatest,
+                last_backward_sync_at: backwardOldest
             });
         });
         
-        console.log(`[LocationSync] Node ${nodeId}: Successfully synced ${locations.length} location(s)`);
-        return { success: true, count: locations.length };
+        console.log(`[LocationSync] Node ${nodeId}: Successfully synced ${allLocations.length} location(s) (forward: ${forwardLocations.length}, backward: ${backwardLocations.length})`);
+        return { success: true, count: allLocations.length };
         
     } catch (error) {
         console.error(`[LocationSync] Node ${nodeId}: Error during sync:`, error);
@@ -178,6 +225,19 @@ export async function syncAllNodes() {
         const syncDuration = Date.now() - syncStartTime;
         console.log(`[LocationSync] Sync completed in ${syncDuration}ms: ${synced}/${nodeIds.length} nodes synced, ${totalCount} total locations, ${errors.length} errors`);
         
+        // Update reports_since_last_refresh count
+        if (totalCount > 0) {
+            await db.transaction('rw', db.reports_since_last_refresh, async () => {
+                const existing = await db.reports_since_last_refresh.get(1);
+                const currentCount = existing?.count || 0;
+                await db.reports_since_last_refresh.put({
+                    id: 1,
+                    count: currentCount + totalCount
+                });
+                console.log(`[LocationSync] Updated reports_since_last_refresh: ${currentCount} + ${totalCount} = ${currentCount + totalCount}`);
+            });
+        }
+        
         return {
             synced,
             total: nodeIds.length,
@@ -193,20 +253,22 @@ export async function syncAllNodes() {
 }
 
 /**
- * Update node sync time (manual override)
+ * Update node sync times (manual override)
  * @param {string} nodeId - Node ID
- * @param {number} lastSyncTime - UTC milliseconds timestamp
+ * @param {number} lastForwardSyncAt - UTC milliseconds timestamp for forward sync
+ * @param {number} lastBackwardSyncAt - UTC milliseconds timestamp for backward sync
  */
-export async function updateNodeSync(nodeId, lastSyncTime) {
+export async function updateNodeSync(nodeId, lastForwardSyncAt, lastBackwardSyncAt) {
     await db.node_sync.put({
         node_id: nodeId,
-        last_sync_time: lastSyncTime
+        last_forward_sync_at: lastForwardSyncAt,
+        last_backward_sync_at: lastBackwardSyncAt
     });
 }
 
 /**
  * Deep sync locations from a node for a specific time range (bypasses incremental sync)
- * Forces retrieval of all data within [startTime, endTime] range
+ * Fetches last 3 hours of data and sets forward/backward sync times properly
  * @param {string} nodeId - Node ID to sync from
  * @param {number} startTime - UTC milliseconds timestamp (start of range)
  * @param {number} endTime - UTC milliseconds timestamp (end of range)
@@ -221,14 +283,24 @@ export async function deepSyncWithNode(nodeId, startTime, endTime) {
         const locations = await fetchNodeData(nodeId, startTime, endTime);
         console.log(`[LocationSync] Deep sync Node ${nodeId}: Received ${locations.length} location(s) in time range`);
         
-        if (locations.length === 0) {
-            // Update sync time even if no data in range
-            await db.node_sync.put({
-                node_id: nodeId,
-                last_sync_time: now
-            });
-            console.log(`[LocationSync] Deep sync Node ${nodeId}: No data in time range, sync time updated`);
-            return { success: true, count: 0 };
+        let forwardLatest = endTime;
+        let backwardOldest = startTime;
+        
+        if (locations.length > 0) {
+            // Find latest and oldest created_at in the data
+            for (const loc of locations) {
+                const createdAt = typeof loc.created_at === 'string' ? new Date(loc.created_at).getTime() : loc.created_at;
+                if (createdAt > forwardLatest) {
+                    forwardLatest = createdAt;
+                }
+                if (createdAt < backwardOldest) {
+                    backwardOldest = createdAt;
+                }
+            }
+        } else {
+            // No data in range, set sync times to range boundaries
+            forwardLatest = endTime;
+            backwardOldest = startTime;
         }
         
         // Write to IndexedDB in transaction
@@ -251,14 +323,15 @@ export async function deepSyncWithNode(nodeId, startTime, endTime) {
                 }
             }
             
-            // Update node sync time
+            // Update node sync times (set both forward and backward to cover the synced range)
             await db.node_sync.put({
                 node_id: nodeId,
-                last_sync_time: now
+                last_forward_sync_at: forwardLatest,
+                last_backward_sync_at: backwardOldest
             });
         });
         
-        console.log(`[LocationSync] Deep sync Node ${nodeId}: Successfully synced ${locations.length} location(s)`);
+        console.log(`[LocationSync] Deep sync Node ${nodeId}: Successfully synced ${locations.length} location(s), sync times set to forward: ${new Date(forwardLatest).toISOString()}, backward: ${new Date(backwardOldest).toISOString()}`);
         return { success: true, count: locations.length };
         
     } catch (error) {
@@ -365,20 +438,91 @@ export async function deepSyncAllNodes(startTime, endTime) {
 }
 
 /**
+ * Sync scheduler state
+ */
+let syncSchedulerTimeout = null;
+let isSyncRunning = false;
+
+/**
+ * Start automatic sync scheduler
+ * Runs sync every 2 seconds after previous sync finishes
+ */
+export function startSyncScheduler() {
+    if (syncSchedulerTimeout) {
+        console.log('[LocationSync] Sync scheduler already running');
+        return;
+    }
+    
+    console.log('[LocationSync] Starting sync scheduler (every 2s after completion)');
+    
+    async function runSync() {
+        if (isSyncRunning) {
+            console.log('[LocationSync] Sync already running, skipping');
+            scheduleNextSync();
+            return;
+        }
+        
+        isSyncRunning = true;
+        try {
+            await syncAllNodes();
+        } catch (error) {
+            console.error('[LocationSync] Sync scheduler error:', error);
+        } finally {
+            isSyncRunning = false;
+            // Schedule next sync 2 seconds after this one finishes
+            scheduleNextSync();
+        }
+    }
+    
+    function scheduleNextSync() {
+        syncSchedulerTimeout = setTimeout(runSync, 2000);
+    }
+    
+    // Start first sync immediately
+    runSync();
+}
+
+/**
+ * Stop automatic sync scheduler
+ */
+export function stopSyncScheduler() {
+    if (syncSchedulerTimeout) {
+        clearTimeout(syncSchedulerTimeout);
+        syncSchedulerTimeout = null;
+        console.log('[LocationSync] Sync scheduler stopped');
+    }
+}
+
+/**
  * Get sync status for all nodes
- * @returns {Promise<Array>} Array of sync status objects
+ * @returns {Promise<Array>} Array of sync status objects with forward/backward sync info
  */
 export async function getSyncStatus() {
     try {
         const nodeIds = await fetchNodeList();
         const syncStatuses = await db.node_sync.bulkGet(nodeIds);
+        const now = Date.now();
+        
+        // Get location counts per node
+        const locationCounts = {};
+        const allLocations = await db.locations.toArray();
+        for (const loc of allLocations) {
+            const nodeId = loc.node_id;
+            locationCounts[nodeId] = (locationCounts[nodeId] || 0) + 1;
+        }
         
         return nodeIds.map(nodeId => {
             const sync = syncStatuses.find(s => s && s.node_id === nodeId);
+            const forwardSyncAt = sync?.last_forward_sync_at || null;
+            const backwardSyncAt = sync?.last_backward_sync_at || null;
+            
             return {
                 node_id: nodeId,
-                last_sync_time: sync ? sync.last_sync_time : null,
-                sync_age_ms: sync ? Date.now() - sync.last_sync_time : null
+                last_forward_sync_at: forwardSyncAt,
+                last_backward_sync_at: backwardSyncAt,
+                forward_sync_age_ms: forwardSyncAt ? now - forwardSyncAt : null,
+                backward_sync_age_ms: backwardSyncAt ? now - backwardSyncAt : null,
+                location_count: locationCounts[nodeId] || 0
             };
         });
     } catch (error) {

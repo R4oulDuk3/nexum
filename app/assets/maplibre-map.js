@@ -560,16 +560,20 @@ function createMarkerElement(entityType, location, isUser = false) {
         labelText.style.textOverflow = 'ellipsis';
         
         // Format: "(time) name" or just "(time)" if no name
+        // If this is the user's location, show "YOU" instead of metadata name
         const timeStr = formatTimeForMarker(location.created_at);
-        const nameStr = location.metadata && location.metadata.name 
-            ? ` ${location.metadata.name}` 
-            : '';
+        const nameStr = isUser 
+            ? ' YOU' 
+            : (location.metadata && location.metadata.name 
+                ? ` ${location.metadata.name}` 
+                : '');
         labelText.textContent = `(${timeStr})${nameStr}`;
         
         labelWrapper.appendChild(labelText);
         container.appendChild(labelWrapper);
     } else if (location.metadata && location.metadata.name) {
         // Only show name if there's no timestamp
+        // If this is the user's location, show "YOU" instead of metadata name
         const nameWrapper = document.createElement('div');
         nameWrapper.style.marginTop = '2px';
         nameWrapper.style.padding = '2px 4px';
@@ -587,7 +591,7 @@ function createMarkerElement(entityType, location, isUser = false) {
         nameLabel.style.fontWeight = '500';
         nameLabel.style.overflow = 'hidden';
         nameLabel.style.textOverflow = 'ellipsis';
-        nameLabel.textContent = location.metadata.name;
+        nameLabel.textContent = isUser ? 'YOU' : location.metadata.name;
         
         nameWrapper.appendChild(nameLabel);
         container.appendChild(nameWrapper);
@@ -871,6 +875,18 @@ export async function refreshMapMarkers(map, mapId = 'default') {
     console.log(`[MapRefresh] ========================================`);
     
     try {
+        // Check if there are new reports since last refresh
+        const { default: db } = await import('./location-sync-db.js');
+        const refreshData = await db.reports_since_last_refresh.get(1);
+        const newReportsCount = refreshData?.count || 0;
+        
+        if (newReportsCount === 0) {
+            console.log(`[MapRefresh] No new reports (count: ${newReportsCount}), skipping refresh`);
+            return;
+        }
+        
+        console.log(`[MapRefresh] Found ${newReportsCount} new reports, refreshing map...`);
+        
         // Import modules dynamically to avoid circular dependencies
         const { getMapConfig } = await import('./map-config.js');
         const { getLocationsGroupedByEntity } = await import('./location-reader.js');
@@ -941,6 +957,15 @@ export async function refreshMapMarkers(map, mapId = 'default') {
         console.log(`[MapRefresh]   - Markers after: ${newMarkerCount}`);
         console.log(`[MapRefresh]   - Duration: ${refreshDuration}ms`);
         console.log(`[MapRefresh] ========================================`);
+        
+        // Reset count after refresh
+        await db.transaction('rw', db.reports_since_last_refresh, async () => {
+            await db.reports_since_last_refresh.put({
+                id: 1,
+                count: 0
+            });
+            console.log(`[MapRefresh] Reset reports_since_last_refresh count to 0`);
+        });
         
     } catch (error) {
         const refreshDuration = Date.now() - refreshStartTime;

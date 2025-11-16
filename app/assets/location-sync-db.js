@@ -23,6 +23,7 @@ class LocationSyncDB extends Dexie {
     latest_locations;
     node_sync;
     map_mode;
+    reports_since_last_refresh;
     
     constructor() {
         super('nexum_locations');
@@ -41,6 +42,23 @@ class LocationSyncDB extends Dexie {
             
             // Map display configurations
             map_mode: 'map_id'
+        });
+        
+        // Version 2: Add forward/backward sync times to node_sync
+        this.version(2).stores({
+            locations: 'id, entity_id, entity_type, created_at, node_id, [entity_id+created_at]',
+            latest_locations: 'entity_id, entity_type, updated_at',
+            node_sync: 'node_id, last_forward_sync_at, last_backward_sync_at',
+            map_mode: 'map_id'
+        });
+        
+        // Version 3: Add reports_since_last_refresh table
+        this.version(3).stores({
+            locations: 'id, entity_id, entity_type, created_at, node_id, [entity_id+created_at]',
+            latest_locations: 'entity_id, entity_type, updated_at',
+            node_sync: 'node_id, last_forward_sync_at, last_backward_sync_at',
+            map_mode: 'map_id',
+            reports_since_last_refresh: 'id'  // Single row with count
         });
     }
 }

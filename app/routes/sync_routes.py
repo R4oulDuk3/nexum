@@ -162,11 +162,12 @@ def get_sync_data():
 def trigger_sync():
     """Trigger sync with all peers in the mesh network"""
     try:
-        # Sync with all peers
-        sync_service.sync_with_all_peers()
+        # Sync with all peers and get statistics
+        stats = sync_service.sync_with_all_peers()
         
         return jsonify({
-            'status': 'success'
+            'status': 'success',
+            **stats  # Include all statistics in response
         })
         
     except Exception as e:

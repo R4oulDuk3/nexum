@@ -370,8 +370,13 @@
                     // Update status bar after refresh
                     await updateStatusBar();
                     
-                    // Start automatic map refresh every 5 seconds
-                    console.log('[MapRefresh] Starting automatic map refresh (interval: 5s)');
+                    // Start sync scheduler (runs every 2 seconds after previous sync finishes)
+                    const { startSyncScheduler, stopSyncScheduler } = await import("{{ url_for('static', filename='location-sync.js') }}");
+                    startSyncScheduler();
+                    window.stopSyncScheduler = stopSyncScheduler; // Store for cleanup
+                    
+                    // Start automatic map refresh every 1 second
+                    console.log('[MapRefresh] Starting automatic map refresh (interval: 1s)');
                     let mapRefreshInterval = setInterval(async () => {
                         try {
                             console.log('[MapRefresh] Automatic refresh triggered');
@@ -383,7 +388,7 @@
                         } catch (error) {
                             console.error('[MapRefresh] Error during automatic refresh:', error);
                         }
-                    }, 5000); // 5 seconds
+                    }, 1000); // 1 second
                     
                     // Store interval ID for potential cleanup
                     window.mapRefreshInterval = mapRefreshInterval;
@@ -424,6 +429,10 @@
                 console.log('[MapRefresh] Stopping automatic map refresh');
                 clearInterval(window.mapRefreshInterval);
                 window.mapRefreshInterval = null;
+            }
+            if (window.stopSyncScheduler) {
+                console.log('[LocationSync] Stopping sync scheduler');
+                window.stopSyncScheduler();
             }
         });
         
