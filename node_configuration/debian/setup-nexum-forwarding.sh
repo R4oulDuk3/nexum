@@ -2,7 +2,8 @@
 # Nexum Mesh Network - DNS and Port Forwarding Setup
 # This script sets up:
 #   1. DNS resolution for "nexum" hostname to resolve to the access point IP
-#   2. Port forwarding from port 80 to 5000 (for the Flask app)
+#   2. Port forwarding from port 80 to 5000 (for HTTP Flask app)
+#   3. Port forwarding from port 443 to 5000 (for HTTPS Flask app)
 #
 # Prerequisites: setup-ap.sh must be run first
 
@@ -98,7 +99,8 @@ echo "Configuration:"
 echo "  Bridge interface: $BRIDGE_INTERFACE"
 echo "  Bridge IP: $BRIDGE_IP"
 echo "  Hostname: nexum"
-echo "  Port forwarding: 80 → 5000"
+echo "  Port forwarding: 80 → 5000 (HTTP)"
+echo "  Port forwarding: 443 → 5000 (HTTPS)"
 echo ""
 
 # ==============================================================================
@@ -146,7 +148,7 @@ echo "  ✓ DNS configured: nexum → $BRIDGE_IP"
 # ==============================================================================
 
 echo ""
-echo "Configuring port forwarding (80 → 5000)..."
+echo "Configuring port forwarding (80 → 5000 and 443 → 5000)..."
 
 # Check if iptables is available
 if ! command -v iptables &> /dev/null; then
@@ -168,23 +170,32 @@ fi
 
 # Remove existing port forwarding rules if they exist
 echo "  Removing existing port forwarding rules..."
+
+# Remove HTTP (80) rules
 iptables -t nat -D PREROUTING -p tcp --dport 80 -j REDIRECT --to-port 5000 2>/dev/null || true
 iptables -t nat -D OUTPUT -p tcp -d 127.0.0.1 --dport 80 -j REDIRECT --to-port 5000 2>/dev/null || true
 iptables -t nat -D OUTPUT -p tcp -d "$BRIDGE_IP" --dport 80 -j REDIRECT --to-port 5000 2>/dev/null || true
 
+# Remove HTTPS (443) rules
+iptables -t nat -D PREROUTING -p tcp --dport 443 -j REDIRECT --to-port 5000 2>/dev/null || true
+iptables -t nat -D OUTPUT -p tcp -d 127.0.0.1 --dport 443 -j REDIRECT --to-port 5000 2>/dev/null || true
+iptables -t nat -D OUTPUT -p tcp -d "$BRIDGE_IP" --dport 443 -j REDIRECT --to-port 5000 2>/dev/null || true
+
 # Add port forwarding rules
 echo "  Adding port forwarding rules..."
 
-# Forward external connections on port 80 to port 5000
+# Forward external connections on port 80 (HTTP) to port 5000
 iptables -t nat -A PREROUTING -p tcp --dport 80 -j REDIRECT --to-port 5000
-
-# Forward localhost connections (for testing)
 iptables -t nat -A OUTPUT -p tcp -d 127.0.0.1 --dport 80 -j REDIRECT --to-port 5000
-
-# Forward connections to bridge IP
 iptables -t nat -A OUTPUT -p tcp -d "$BRIDGE_IP" --dport 80 -j REDIRECT --to-port 5000
 
-echo "  ✓ Port forwarding configured: 80 → 5000"
+# Forward external connections on port 443 (HTTPS) to port 5000
+iptables -t nat -A PREROUTING -p tcp --dport 443 -j REDIRECT --to-port 5000
+iptables -t nat -A OUTPUT -p tcp -d 127.0.0.1 --dport 443 -j REDIRECT --to-port 5000
+iptables -t nat -A OUTPUT -p tcp -d "$BRIDGE_IP" --dport 443 -j REDIRECT --to-port 5000
+
+echo "  ✓ Port forwarding configured: 80 → 5000 (HTTP)"
+echo "  ✓ Port forwarding configured: 443 → 5000 (HTTPS)"
 
 # ==============================================================================
 # Save iptables rules (make persistent)
@@ -238,17 +249,19 @@ echo "========================================="
 echo ""
 echo "Configuration:"
 echo "  DNS: nexum → $BRIDGE_IP"
-echo "  Port forwarding: 80 → 5000"
+echo "  Port forwarding: 80 → 5000 (HTTP)"
+echo "  Port forwarding: 443 → 5000 (HTTPS)"
 echo ""
 echo "Testing:"
 echo "  From a device connected to the AP, try:"
-echo "    http://nexum/"
-echo "    http://nexum:80/"
-echo "  Both should forward to http://$BRIDGE_IP:5000"
+echo "    HTTP:  http://nexum/"
+echo "    HTTPS: https://nexum/"
+echo "    Both should forward to http://$BRIDGE_IP:5000 (or https:// if certificates are present)"
 echo ""
 echo "Note:"
 echo "  - DNS changes take effect immediately for new connections"
 echo "  - Existing connections may need to be refreshed"
-echo "  - Port forwarding works for all connections to port 80"
+echo "  - Port forwarding works for all connections to ports 80 and 443"
+echo "  - HTTPS requires cert.pem and key.pem in the app directory"
 echo ""
 

@@ -208,19 +208,24 @@ revert_mesh() {
     # Step 8: Remove Nexum port forwarding rules
     echo "8. Removing Nexum port forwarding rules..."
     
-    # Remove specific port forwarding rules (80 → 5000)
+    # Remove specific port forwarding rules (80 → 5000 and 443 → 5000)
     # Try to get bridge IP to remove specific rules
     BRIDGE_IP=""
     if ip link show br-ap &>/dev/null; then
         BRIDGE_IP=$(ip addr show br-ap 2>/dev/null | grep "inet " | awk '{print $2}' | cut -d'/' -f1 || echo "")
     fi
     
-    # Remove port forwarding rules
+    # Remove HTTP (80) port forwarding rules
     iptables -t nat -D PREROUTING -p tcp --dport 80 -j REDIRECT --to-port 5000 2>/dev/null || true
     iptables -t nat -D OUTPUT -p tcp -d 127.0.0.1 --dport 80 -j REDIRECT --to-port 5000 2>/dev/null || true
     
+    # Remove HTTPS (443) port forwarding rules
+    iptables -t nat -D PREROUTING -p tcp --dport 443 -j REDIRECT --to-port 5000 2>/dev/null || true
+    iptables -t nat -D OUTPUT -p tcp -d 127.0.0.1 --dport 443 -j REDIRECT --to-port 5000 2>/dev/null || true
+    
     if [ -n "$BRIDGE_IP" ]; then
         iptables -t nat -D OUTPUT -p tcp -d "$BRIDGE_IP" --dport 80 -j REDIRECT --to-port 5000 2>/dev/null || true
+        iptables -t nat -D OUTPUT -p tcp -d "$BRIDGE_IP" --dport 443 -j REDIRECT --to-port 5000 2>/dev/null || true
     fi
     
     # Save iptables rules if iptables-persistent is available
@@ -230,7 +235,7 @@ revert_mesh() {
         iptables-save > /etc/iptables/rules.v4 2>/dev/null || true
     fi
     
-    echo "   ✓ Nexum port forwarding rules removed"
+    echo "   ✓ Nexum port forwarding rules removed (ports 80 and 443)"
     
     # Step 9: Unload batman-adv module (optional)
     echo "9. Unloading batman-adv module..."
