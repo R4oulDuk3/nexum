@@ -374,7 +374,7 @@ class SyncService:
         peers = self.get_all_peers()
         
         now_ms = int(datetime.now(timezone.utc).timestamp() * 1000)
-        thirty_minutes_ms = 30 * 60 * 1000  # 30 minutes in milliseconds
+        sync_window_ms = 5 * 60 * 1000  # 5 minutes in milliseconds
         
         # Statistics tracking
         peers_found = len(peers)
@@ -415,10 +415,10 @@ class SyncService:
                 # Get sync times for this peer
                 forward_sync_at, backward_sync_at = self.get_last_sync_times(peer_mac)
                 
-                # Forward sync: Get new data from last_forward_sync_at to now (in 30min chunks)
-                # We sync 30 minutes at a time to avoid pulling too much data at once
+                # Forward sync: Get new data from last_forward_sync_at to now (in 5min chunks)
+                # We sync 5 minutes at a time to avoid pulling too much data at once
                 forward_from: int = forward_sync_at
-                forward_until: int = min(forward_from + thirty_minutes_ms, now_ms)
+                forward_until: int = min(forward_from + sync_window_ms, now_ms)
                 forward_data: List[LocationReport] = self.pull_data_from_peer(peer_ip, forward_from, forward_until)
                 
                 # Save forward sync data and find latest created_at
@@ -437,9 +437,9 @@ class SyncService:
                         if created_at > forward_latest:
                             forward_latest = created_at
                 
-                # Backward sync: Get old data from (backward_sync_at - 30min) to backward_sync_at
+                # Backward sync: Get old data from (backward_sync_at - 5min) to backward_sync_at
                 # This fills gaps in historical data
-                backward_from = max(0, backward_sync_at - thirty_minutes_ms)
+                backward_from = max(0, backward_sync_at - sync_window_ms)
                 backward_data: List[LocationReport] = self.pull_data_from_peer(peer_ip, backward_from, backward_sync_at)
                 
                 # Save backward sync data and find oldest created_at

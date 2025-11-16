@@ -53,7 +53,7 @@ export async function fetchNodeData(nodeId, sinceTimestamp, untilTimestamp) {
 export async function syncWithNode(nodeId) {
     try {
         const now = Date.now();
-        const thirtyMinutesMs = 30 * 60 * 1000; // 30 minutes in milliseconds
+        const syncWindowMs = 5 * 60 * 1000; // 5 minutes in milliseconds
         
         // Get sync times from Dexie
         const nodeSync = await db.node_sync.get(nodeId);
@@ -70,9 +70,9 @@ export async function syncWithNode(nodeId) {
         let forwardLatest = forwardSyncAt;
         let backwardOldest = backwardSyncAt;
         
-        // Forward sync: Get new data from last_forward_sync_at to last_forward_sync_at + 30min
+        // Forward sync: Get new data from last_forward_sync_at to last_forward_sync_at + 5min
         const forwardFrom = forwardSyncAt;
-        const forwardUntil = Math.min(forwardFrom + thirtyMinutesMs, now);
+        const forwardUntil = Math.min(forwardFrom + syncWindowMs, now);
         
         console.log(`[LocationSync] Node ${nodeId}: Forward sync from ${new Date(forwardFrom).toISOString()} to ${new Date(forwardUntil).toISOString()}`);
         const forwardLocations = await fetchNodeData(nodeId, forwardFrom, forwardUntil);
@@ -92,8 +92,8 @@ export async function syncWithNode(nodeId) {
             forwardLatest = now;
         }
         
-        // Backward sync: Get old data from (last_backward_sync_at - 30min) to last_backward_sync_at
-        const backwardFrom = Math.max(0, backwardSyncAt - thirtyMinutesMs);
+        // Backward sync: Get old data from (last_backward_sync_at - 5min) to last_backward_sync_at
+        const backwardFrom = Math.max(0, backwardSyncAt - syncWindowMs);
         const backwardUntil = backwardSyncAt;
         
         console.log(`[LocationSync] Node ${nodeId}: Backward sync from ${new Date(backwardFrom).toISOString()} to ${new Date(backwardUntil).toISOString()}`);
