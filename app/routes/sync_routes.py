@@ -9,13 +9,16 @@ from apispec import APISpec
 from apispec.ext.marshmallow import MarshmallowPlugin
 import sys
 from pathlib import Path
+from datetime import datetime, timezone
 
 sys.path.append(str(Path(__file__).parent.parent))
 
 from services.sync_service import get_sync_service
+from services.location_service import LocationService
 
 sync_bp = Blueprint('sync', __name__, url_prefix='/api/sync')
 sync_service = get_sync_service()
+location_service = LocationService()
 
 # Create APISpec instance for schema conversion (if needed)
 _apispec = APISpec(
@@ -89,8 +92,9 @@ def get_sync_data():
         # Log incoming sync request (when peer pulls data from us)
         sync_service.log_incoming_sync_request(peer_ip)
         
-        # Get data from sync service
-        data = sync_service.get_own_data_since(since)
+        # Get data from sync service (default until to current time)
+        until = int(datetime.now(timezone.utc).timestamp() * 1000)
+        data = sync_service.get_own_data_since(since, until)
         
         return jsonify({
             'status': 'success',
@@ -159,11 +163,10 @@ def trigger_sync():
     """Trigger sync with all peers in the mesh network"""
     try:
         # Sync with all peers
-        results = sync_service.sync_with_all_peers()
+        sync_service.sync_with_all_peers()
         
         return jsonify({
-            'status': 'success',
-            **results
+            'status': 'success'
         })
         
     except Exception as e:
@@ -235,11 +238,11 @@ def get_node_list():
         }), 500
 
 
-@sync_bp.route('/node/<node_id>/data', methods=['GET'])
+@sync_bp.route('/node/<node_id>/from/<from_timestamp>/to/<to_timestamp>', methods=['GET'])
 @swag_from({
     'tags': ['sync'],
-    'summary': 'Get node data since timestamp',
-    'description': 'Retrieve location data for a specific node that is newer than the specified timestamp',
+    'summary': 'Get locations in range',
+    'description': 'Get locations in range for a specific node',
     'parameters': [
         {
             'name': 'node_id',
@@ -247,48 +250,38 @@ def get_node_list():
             'required': True,
             'schema': {
                 'type': 'string'
-            },
-            'description': 'Node ID (MAC address)'
+            }
         },
         {
-            'name': 'since',
-            'in': 'query',
-            'required': False,
+            'name': 'from_timestamp',
+            'in': 'path',
+            'required': True,
             'schema': {
-                'type': 'integer',
-                'default': 0
-            },
-            'description': 'UTC milliseconds timestamp (optional, defaults to 0)'
+                'type': 'integer'
+            }
+        },
+        {
+            'name': 'to_timestamp',
+            'in': 'path',
+            'required': True,
+            'schema': {
+                'type': 'integer'
+            }
         }
     ],
     'responses': {
         200: {
-            'description': 'Data retrieved successfully',
+            'description': 'Locations retrieved successfully',
             'content': {
                 'application/json': {
                     'schema': {
                         'type': 'object',
                         'properties': {
                             'status': {'type': 'string', 'example': 'success'},
-                            'count': {'type': 'integer', 'example': 1},
                             'data': {
                                 'type': 'array',
                                 'items': {'type': 'object'}
                             }
-                        }
-                    }
-                }
-            }
-        },
-        400: {
-            'description': 'Invalid parameter',
-            'content': {
-                'application/json': {
-                    'schema': {
-                        'type': 'object',
-                        'properties': {
-                            'status': {'type': 'string', 'example': 'error'},
-                            'message': {'type': 'string'}
                         }
                     }
                 }
@@ -310,26 +303,90 @@ def get_node_list():
         }
     }
 })
-def get_node_data(node_id):
-    """Get location data for a specific node since a timestamp"""
+def get_locations_in_range(node_id, from_timestamp, to_timestamp):
+    """Get locations in range"""
     try:
-        since = request.args.get('since', type=int, default=0)
-        
-        # Get data from sync service
-        data = sync_service.get_node_data_since(node_id, since)
-        
+        locations = location_service.get_locations_in_range(node_id, int(from_timestamp), int(to_timestamp))
         return jsonify({
             'status': 'success',
-            'count': len(data),
-            'data': data
-        })
-        
-    except ValueError as e:
+            'data': [l.to_dict() for l in locations]
+        }), 200
+    except Exception as e:
+        print(f'Server error on getting locations in range: {str(e)}')
         return jsonify({
             'status': 'error',
-            'message': f'Invalid parameter: {str(e)}'
-        }), 400
+            'message': f'Server error: {str(e)}'
+        }), 500
+
+
+@sync_bp.route('/node/sync/from/<from_timestamp>/to/<to_timestamp>', methods=['GET'])
+@swag_from({
+    'tags': ['sync'],
+    'summary': 'Get locations in range for sync',
+    'description': 'Get locations in range for the current node (for sync)',
+    'parameters': [
+        {
+            'name': 'from_timestamp',
+            'in': 'path',
+            'required': True,
+            'schema': {
+                'type': 'integer'
+            }
+        },
+        {
+            'name': 'to_timestamp',
+            'in': 'path',
+            'required': True,
+            'schema': {
+                'type': 'integer'
+            }
+        }
+    ],
+    'responses': {
+        200: {
+            'description': 'Locations retrieved successfully',
+            'content': {
+                'application/json': {
+                    'schema': {
+                        'type': 'object',
+                        'properties': {
+                            'status': {'type': 'string', 'example': 'success'},
+                            'data': {
+                                'type': 'array',
+                                'items': {'type': 'object'}
+                            }
+                        }
+                    }
+                }
+            }
+        },
+        500: {
+            'description': 'Server error',
+            'content': {
+                'application/json': {
+                    'schema': {
+                        'type': 'object',
+                        'properties': {
+                            'status': {'type': 'string', 'example': 'error'},
+                            'message': {'type': 'string'}
+                        }
+                    }
+                }
+            }
+        }
+    }
+})
+def get_locations_in_range_sync(from_timestamp, to_timestamp):
+    """Get locations in range for sync"""
+    try:
+        node_id = sync_service.get_my_node_id()
+        locations = location_service.get_locations_in_range(node_id, int(from_timestamp), int(to_timestamp))
+        return jsonify({
+            'status': 'success',
+            'data': [l.to_dict() for l in locations]
+        }), 200
     except Exception as e:
+        print(f'Server error on getting sync data: {str(e)}')
         return jsonify({
             'status': 'error',
             'message': f'Server error: {str(e)}'
@@ -407,121 +464,6 @@ def get_sync_status():
         
         return jsonify(response)
         
-    except Exception as e:
-        return jsonify({
-            'status': 'error',
-            'message': f'Server error: {str(e)}'
-        }), 500
-
-
-@sync_bp.route('/test', methods=['GET'])
-@swag_from({
-    'tags': ['sync'],
-    'summary': 'Test: Pull data from all peers',
-    'description': 'Test endpoint that pulls data from all peers. By default uses sync_log timestamps per peer for incremental sync. Optionally accepts a since parameter to override. Does not update sync logs.',
-    'parameters': [
-        {
-            'name': 'since',
-            'in': 'query',
-            'required': False,
-            'schema': {
-                'type': 'integer',
-                'nullable': True
-            },
-            'description': 'Optional UTC milliseconds timestamp to use for all peers (overrides sync_log). If omitted, uses sync_log timestamp per peer.'
-        },
-        {
-            'name': 'use_sync_log',
-            'in': 'query',
-            'required': False,
-            'schema': {
-                'type': 'boolean',
-                'default': True
-            },
-            'description': 'If true, use sync_log timestamps per peer. If false and since is provided, use since for all peers. If false and since is not provided, use 0.'
-        }
-    ],
-    'responses': {
-        200: {
-            'description': 'Test pull completed',
-            'content': {
-                'application/json': {
-                    'schema': {
-                        'type': 'object',
-                        'properties': {
-                            'status': {'type': 'string', 'example': 'success'},
-                            'peers_found': {'type': 'integer', 'example': 2},
-                            'peers_attempted': {'type': 'integer', 'example': 2},
-                            'messages': {
-                                'type': 'array',
-                                'items': {'type': 'string'}
-                            },
-                            'errors': {
-                                'type': 'array',
-                                'items': {'type': 'string'}
-                            }
-                        }
-                    }
-                }
-            }
-        },
-        500: {
-            'description': 'Server error',
-            'content': {
-                'application/json': {
-                    'schema': {
-                        'type': 'object',
-                        'properties': {
-                            'status': {'type': 'string', 'example': 'error'},
-                            'message': {'type': 'string'}
-                        }
-                    }
-                }
-            }
-        }
-    }
-})
-def test_pull_all_peers():
-    """
-    Test endpoint to pull data from all peers.
-    By default uses sync_log timestamps per peer for incremental sync.
-    Can optionally override with since parameter.
-    """
-    try:
-        # Check if this is an auto-sync call (from scheduler)
-        is_auto_sync = request.args.get('use_sync_log', '').lower() == 'true' and request.args.get('since') is None
-        
-        if is_auto_sync:
-            print(f"📡 AUTO SYNC TRIGGERED via /api/sync/test")
-        
-        # Get since parameter (None if not provided, so we use sync_log)
-        since_param = request.args.get('since', type=int)
-        
-        # Get use_sync_log parameter (default True)
-        use_sync_log_param = request.args.get('use_sync_log', type=str, default='true').lower() in ('true', '1', 'yes')
-        
-        # Call test function in sync service
-        results = sync_service.test_pull_all_peers(
-            since_timestamp=since_param,
-            use_sync_log=use_sync_log_param
-        )
-        
-        if is_auto_sync:
-            peers_found = results.get('peers_found', 0)
-            reports_pulled = results.get('total_reports_pulled', 0)
-            reports_saved = results.get('total_reports_saved', 0)
-            print(f"📊 Auto Sync Results: {peers_found} peers, {reports_pulled} reports pulled, {reports_saved} saved")
-        
-        return jsonify({
-            'status': 'success',
-            **results
-        })
-        
-    except ValueError as e:
-        return jsonify({
-            'status': 'error',
-            'message': f'Invalid parameter: {str(e)}'
-        }), 400
     except Exception as e:
         return jsonify({
             'status': 'error',
