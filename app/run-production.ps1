@@ -5,6 +5,10 @@
 #   HOST - Host to bind to (default: 0.0.0.0)
 #   PORT - Port to bind to (default: 5000)
 #   WORKERS - Number of worker threads (default: 4)
+#   HTTPS - HTTPS control (default: auto-detect)
+#     - HTTPS=true  - Force HTTPS (requires cert.pem and key.pem)
+#     - HTTPS=false - Force HTTP (ignore certificates)
+#     - HTTPS=""    - Auto-detect (use HTTPS if certificates exist)
 #   SYNC_ENABLED - Enable sync scheduler (default: true)
 #   SYNC_INTERVAL_SECONDS - Sync interval in seconds (default: 10)
 #   FLASK_ENV - Flask environment (default: production)
@@ -18,6 +22,19 @@ if (-not $env:FLASK_ENV) {
 if (-not $env:HOST) { $env:HOST = "0.0.0.0" }
 if (-not $env:PORT) { $env:PORT = "5000" }
 if (-not $env:WORKERS) { $env:WORKERS = "4" }
+
+# HTTPS control:
+#   HTTPS=true  - Force HTTPS (requires cert.pem and key.pem)
+#   HTTPS=false - Force HTTP (ignore certificates)
+#   HTTPS=""    - Auto-detect (use HTTPS if certificates exist)
+# Examples:
+#   $env:HTTPS="true"  .\run-production.ps1
+#   $env:HTTPS="false" .\run-production.ps1
+#   .\run-production.ps1  # Auto-detect
+if (-not $env:HTTPS) {
+    # Auto-detect based on certificate files
+    $env:HTTPS = ""
+}
 
 Write-Host "========================================" -ForegroundColor Cyan
 Write-Host "Nexum Mesh Messaging - Production Mode" -ForegroundColor Cyan
