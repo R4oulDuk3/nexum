@@ -51,48 +51,59 @@ export class SyncService {
         });
     }
     /**
-     * Get location data for a specific node since a timestamp
-     * Retrieve location data for a specific node that is newer than the specified timestamp
-     * @param nodeId Node ID (MAC address)
-     * @param since UTC milliseconds timestamp (optional, defaults to 0)
-     * @param until UTC milliseconds timestamp (optional, defaults to current time)
-     * @returns any Data retrieved successfully
+     * Get locations in range for sync
+     * Get locations in range for the current node (for sync)
+     * @param fromTimestamp
+     * @param toTimestamp
+     * @returns any Locations retrieved successfully
      * @throws ApiError
      */
-    static getApiSyncNodeData(nodeId, since, until) {
-        const query = {
-            'since': since,
-        };
-        if (until !== undefined) {
-            query['until'] = until;
-        }
+    static getApiSyncNodeSyncFromTo(fromTimestamp, toTimestamp) {
         return __request(OpenAPI, {
             method: 'GET',
-            url: '/api/sync/node/{node_id}/data',
+            url: '/api/sync/node/sync/from/{from_timestamp}/to/{to_timestamp}',
             path: {
-                'node_id': nodeId,
+                'from_timestamp': fromTimestamp,
+                'to_timestamp': toTimestamp,
             },
-            query: query,
             errors: {
-                400: `Invalid parameter`,
                 500: `Server error`,
             },
         });
     }
     /**
-     * Test endpoint to pull data from all peers with a specified timestamp
-     * Test endpoint that pulls data from all peers using since=0 (or specified timestamp). Does not update sync logs.
-     * @param since UTC milliseconds timestamp to use for all peers (default: 0)
-     * @returns any Test pull completed
+     * Get locations in range
+     * Get locations in range for a specific node
+     * @param nodeId
+     * @param fromTimestamp
+     * @param toTimestamp
+     * @returns any Locations retrieved successfully
      * @throws ApiError
      */
-    static getApiSyncTest(since) {
+    static getApiSyncNodeFromTo(nodeId, fromTimestamp, toTimestamp) {
         return __request(OpenAPI, {
             method: 'GET',
-            url: '/api/sync/test',
-            query: {
-                'since': since,
+            url: '/api/sync/node/{node_id}/from/{from_timestamp}/to/{to_timestamp}',
+            path: {
+                'node_id': nodeId,
+                'from_timestamp': fromTimestamp,
+                'to_timestamp': toTimestamp,
             },
+            errors: {
+                500: `Server error`,
+            },
+        });
+    }
+    /**
+     * Get sync_log status for all peers
+     * Get sync_log status for all peers, showing last sync times and IPs
+     * @returns any Sync log status retrieved successfully
+     * @throws ApiError
+     */
+    static getApiSyncStatus() {
+        return __request(OpenAPI, {
+            method: 'GET',
+            url: '/api/sync/status',
             errors: {
                 500: `Server error`,
             },

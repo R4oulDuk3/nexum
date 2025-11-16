@@ -311,4 +311,3 @@ def add_locations_batch():
             'status': 'error',
             'message': f'Server error: {str(e)}'
         }), 500
-

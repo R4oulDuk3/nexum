@@ -20,91 +20,21 @@ export class LocationsService {
         });
     }
     /**
-     * Get location history for an entity
-     * Retrieve location history for a specific entity
-     * @param entityId Entity UUID
-     * @param since UTC milliseconds timestamp (optional)
-     * @param limit Maximum number of results (default: 100)
-     * @returns any Location history retrieved successfully
-     * @throws ApiError
-     */
-    static getApiLocationsHistory(entityId, since, limit = 100) {
-        return __request(OpenAPI, {
-            method: 'GET',
-            url: '/api/locations/history/{entity_id}',
-            path: {
-                'entity_id': entityId,
-            },
-            query: {
-                'since': since,
-                'limit': limit,
-            },
-            errors: {
-                400: `Invalid UUID or parameter`,
-            },
-        });
-    }
-    /**
-     * Get latest location for each entity
-     * Retrieve the most recent location report for each entity
-     * @param type Filter by entity type (optional)
-     * @param limit Maximum number of results (default: 100)
-     * @returns any Latest locations retrieved successfully
-     * @throws ApiError
-     */
-    static getApiLocationsLatest(type, limit = 100) {
-        return __request(OpenAPI, {
-            method: 'GET',
-            url: '/api/locations/latest',
-            query: {
-                'type': type,
-                'limit': limit,
-            },
-            errors: {
-                400: `Invalid parameter`,
-            },
-        });
-    }
-    /**
-     * Find entities near a location
-     * Search for entities within a specified radius of a location
+     * Record multiple location reports in batch
+     * Record multiple location reports in a single request. Useful for scenario generation.
      * @param requestBody
-     * @returns any Nearby entities found
+     * @returns any Locations created successfully
      * @throws ApiError
      */
-    static postApiLocationsNearby(requestBody) {
+    static postApiLocationsBatch(requestBody) {
         return __request(OpenAPI, {
             method: 'POST',
-            url: '/api/locations/nearby',
+            url: '/api/locations/batch',
             body: requestBody,
             mediaType: 'application/json',
             errors: {
                 400: `Invalid request data`,
             },
-        });
-    }
-    /**
-     * Get current node ID
-     * Retrieve the ID of the current mesh node
-     * @returns any Current node ID
-     * @throws ApiError
-     */
-    static getApiLocationsNodeId() {
-        return __request(OpenAPI, {
-            method: 'GET',
-            url: '/api/locations/node-id',
-        });
-    }
-    /**
-     * Get list of valid entity types
-     * Retrieve all valid entity type values
-     * @returns any List of entity types
-     * @throws ApiError
-     */
-    static getApiLocationsTypes() {
-        return __request(OpenAPI, {
-            method: 'GET',
-            url: '/api/locations/types',
         });
     }
 }

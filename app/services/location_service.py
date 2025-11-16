@@ -115,14 +115,30 @@ class LocationService:
             from_timestamp: From timestamp
             to_timestamp: To timestamp
         """
-        conn = sqlite3.connect(self.db_path)
-        cursor = conn.cursor()
-        
-        cursor.execute('''
-            SELECT * FROM location_reports WHERE node_id = ? AND created_at >= ? AND created_at <= ?
-        ''', (node_id, from_timestamp, to_timestamp))
-        
-        return [self._row_to_report(row) for row in cursor.fetchall()]
+        conn = None
+        try:
+            conn = sqlite3.connect(self.db_path)
+            conn.row_factory = sqlite3.Row
+            cursor = conn.cursor()
+            
+            cursor.execute('''
+                SELECT * FROM location_reports WHERE node_id = ? AND created_at >= ? AND created_at <= ?
+            ''', (node_id, from_timestamp, to_timestamp))
+            
+            rows = cursor.fetchall()
+            # Verify rows are Row objects (not tuples)
+            if rows and not isinstance(rows[0], sqlite3.Row):
+                raise ValueError(f"Expected sqlite3.Row objects, got {type(rows[0])}")
+            # Convert rows to LocationReport objects before closing connection
+            reports = [self._row_to_report(row) for row in rows]
+            conn.close()
+            
+            return reports
+        except Exception as e:
+            if conn:
+                conn.close()
+            print(f"LocationService: Error getting locations in range: {e}")
+            raise
     
     
     def _row_to_report(self, row: sqlite3.Row) -> LocationReport:

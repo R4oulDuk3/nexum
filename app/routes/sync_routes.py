@@ -14,9 +14,11 @@ from datetime import datetime, timezone
 sys.path.append(str(Path(__file__).parent.parent))
 
 from services.sync_service import get_sync_service
+from services.location_service import LocationService
 
 sync_bp = Blueprint('sync', __name__, url_prefix='/api/sync')
 sync_service = get_sync_service()
+location_service = LocationService()
 
 # Create APISpec instance for schema conversion (if needed)
 _apispec = APISpec(
@@ -90,8 +92,9 @@ def get_sync_data():
         # Log incoming sync request (when peer pulls data from us)
         sync_service.log_incoming_sync_request(peer_ip)
         
-        # Get data from sync service
-        data = sync_service.get_own_data_since(since)
+        # Get data from sync service (default until to current time)
+        until = int(datetime.now(timezone.utc).timestamp() * 1000)
+        data = sync_service.get_own_data_since(since, until)
         
         return jsonify({
             'status': 'success',
@@ -235,11 +238,11 @@ def get_node_list():
         }), 500
 
 
-@sync_bp.route('/node/<node_id>/data', methods=['GET'])
+@sync_bp.route('/node/<node_id>/from/<from_timestamp>/to/<to_timestamp>', methods=['GET'])
 @swag_from({
     'tags': ['sync'],
-    'summary': 'Get node data since timestamp',
-    'description': 'Retrieve location data for a specific node that is newer than the specified timestamp',
+    'summary': 'Get locations in range',
+    'description': 'Get locations in range for a specific node',
     'parameters': [
         {
             'name': 'node_id',
@@ -247,57 +250,38 @@ def get_node_list():
             'required': True,
             'schema': {
                 'type': 'string'
-            },
-            'description': 'Node ID (MAC address)'
+            }
         },
         {
-            'name': 'since',
-            'in': 'query',
-            'required': False,
-            'schema': {
-                'type': 'integer',
-                'default': 0
-            },
-            'description': 'UTC milliseconds timestamp (optional, defaults to 0)'
-        },
-        {
-            'name': 'until',
-            'in': 'query',
-            'required': False,
+            'name': 'from_timestamp',
+            'in': 'path',
+            'required': True,
             'schema': {
                 'type': 'integer'
-            },
-            'description': 'UTC milliseconds timestamp (optional, defaults to current time)'
+            }
+        },
+        {
+            'name': 'to_timestamp',
+            'in': 'path',
+            'required': True,
+            'schema': {
+                'type': 'integer'
+            }
         }
     ],
     'responses': {
         200: {
-            'description': 'Data retrieved successfully',
+            'description': 'Locations retrieved successfully',
             'content': {
                 'application/json': {
                     'schema': {
                         'type': 'object',
                         'properties': {
                             'status': {'type': 'string', 'example': 'success'},
-                            'count': {'type': 'integer', 'example': 1},
                             'data': {
                                 'type': 'array',
                                 'items': {'type': 'object'}
                             }
-                        }
-                    }
-                }
-            }
-        },
-        400: {
-            'description': 'Invalid parameter',
-            'content': {
-                'application/json': {
-                    'schema': {
-                        'type': 'object',
-                        'properties': {
-                            'status': {'type': 'string', 'example': 'error'},
-                            'message': {'type': 'string'}
                         }
                     }
                 }
@@ -319,31 +303,90 @@ def get_node_list():
         }
     }
 })
-def get_node_data(node_id):
-    """Get location data for a specific node since a timestamp"""
+def get_locations_in_range(node_id, from_timestamp, to_timestamp):
+    """Get locations in range"""
     try:
-        since = request.args.get('since', type=int, default=0)
-        until = request.args.get('until', type=int)
-        
-        # If until is not provided, default to current time
-        if until is None:
-            until = int(datetime.now(timezone.utc).timestamp() * 1000)
-        
-        # Get data from sync service
-        data = sync_service.get_node_data_in_range(node_id, since, until)
-        
+        locations = location_service.get_locations_in_range(node_id, int(from_timestamp), int(to_timestamp))
         return jsonify({
             'status': 'success',
-            'count': len(data),
-            'data': data
-        })
-        
-    except ValueError as e:
+            'data': [l.to_dict() for l in locations]
+        }), 200
+    except Exception as e:
+        print(f'Server error on getting locations in range: {str(e)}')
         return jsonify({
             'status': 'error',
-            'message': f'Invalid parameter: {str(e)}'
-        }), 400
+            'message': f'Server error: {str(e)}'
+        }), 500
+
+
+@sync_bp.route('/node/sync/from/<from_timestamp>/to/<to_timestamp>', methods=['GET'])
+@swag_from({
+    'tags': ['sync'],
+    'summary': 'Get locations in range for sync',
+    'description': 'Get locations in range for the current node (for sync)',
+    'parameters': [
+        {
+            'name': 'from_timestamp',
+            'in': 'path',
+            'required': True,
+            'schema': {
+                'type': 'integer'
+            }
+        },
+        {
+            'name': 'to_timestamp',
+            'in': 'path',
+            'required': True,
+            'schema': {
+                'type': 'integer'
+            }
+        }
+    ],
+    'responses': {
+        200: {
+            'description': 'Locations retrieved successfully',
+            'content': {
+                'application/json': {
+                    'schema': {
+                        'type': 'object',
+                        'properties': {
+                            'status': {'type': 'string', 'example': 'success'},
+                            'data': {
+                                'type': 'array',
+                                'items': {'type': 'object'}
+                            }
+                        }
+                    }
+                }
+            }
+        },
+        500: {
+            'description': 'Server error',
+            'content': {
+                'application/json': {
+                    'schema': {
+                        'type': 'object',
+                        'properties': {
+                            'status': {'type': 'string', 'example': 'error'},
+                            'message': {'type': 'string'}
+                        }
+                    }
+                }
+            }
+        }
+    }
+})
+def get_locations_in_range_sync(from_timestamp, to_timestamp):
+    """Get locations in range for sync"""
+    try:
+        node_id = sync_service.get_my_node_id()
+        locations = location_service.get_locations_in_range(node_id, int(from_timestamp), int(to_timestamp))
+        return jsonify({
+            'status': 'success',
+            'data': [l.to_dict() for l in locations]
+        }), 200
     except Exception as e:
+        print(f'Server error on getting sync data: {str(e)}')
         return jsonify({
             'status': 'error',
             'message': f'Server error: {str(e)}'

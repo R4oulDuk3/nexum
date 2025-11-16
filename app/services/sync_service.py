@@ -55,10 +55,8 @@ class SyncService:
         
         # Mock data for local testing on Windows
         if platform.system() == "Windows":
-            print("SyncService: WARNING: Cannot run 'batctl' on Windows. Returning mock peers.")
+            print("SyncService: WARNING: Cannot run 'batctl' on Windows. Returning empty peers.")
             return {
-                "aa:aa:aa:aa:aa:aa": "169.254.170.170",
-                "bb:bb:bb:bb:bb:bb": "169.254.187.187",
             }
         
         try:
@@ -240,29 +238,24 @@ class SyncService:
                             return f"Connection failed: {reason}"
             return f"Connection error: {error_msg[:150]}"  # Limit length
     
-    def pull_data_from_peer(self, peer_ip: str, from_timestamp: int, until_timestamp: Optional[int] = None) -> List[LocationReport]:
+    def pull_data_from_peer(self, peer_ip: str, from_timestamp: int, until_timestamp: int) -> List[LocationReport]:
         """
-        Pulls data from a peer's /api/sync endpoint within a time range.
+        Pulls data from a peer's sync endpoint within a time range.
         
         Args:
             peer_ip: IP address of the peer
             from_timestamp: Start timestamp (ms)
-            until_timestamp: End timestamp (ms), or None for now()
+            until_timestamp: End timestamp (ms)
         
         Returns:
-            Tuple of (status_message, data_list) where:
-            - status_message: Human-readable status message
-            - data_list: List of location report dicts (empty on error)
+            List of LocationReport objects (empty on error)
         """
         if requests is None:
-            error_msg = f"Error: 'requests' library not installed. Cannot pull data from {peer_ip}"
-            return (error_msg, [])
+            print(f"SyncService: Error: 'requests' library not installed. Cannot pull data from {peer_ip}")
+            return []
         
         try:
-            if until_timestamp is None:
-                url = f"http://{peer_ip}:5000/api/sync?since={from_timestamp}"
-            else:
-                url = f"http://{peer_ip}:5000/api/sync?since={from_timestamp}&until={until_timestamp}"
+            url = f"http://{peer_ip}:5000/api/sync/node/sync/from/{from_timestamp}/to/{until_timestamp}"
             
             response = requests.get(url, timeout=5)
             response.raise_for_status()
@@ -271,17 +264,18 @@ class SyncService:
             
             if response_data.get('status') != 'success':
                 error_msg = f"Peer returned error: {response_data.get('message', 'Unknown error')}"
-                return (error_msg, [])
+                print(f"SyncService: {error_msg}")
+                return []
             
             data_list = response_data.get('data', [])
-            count = response_data.get('count', 0)
             
-            status_msg = f"Pulled {count} reports from {peer_ip}"
+            # Convert dicts to LocationReport objects
+            reports = [LocationReport.from_dict(item) for item in data_list]
             
-            return data_list.map(LocationReport.from_dict)
+            return reports
         except Exception as e:
-            print(f"SyncService: error in pull_data_from_peer: {error_msg}")
-            raise e
+            print(f"SyncService: Error pulling data from {peer_ip}: {str(e)}")
+            return []
     
     def save_location_reports(self, reports: List[Dict[str, Any]]) -> Tuple[int, int]:
         """
@@ -348,111 +342,18 @@ class SyncService:
         
         return (saved_count, skipped_count)
     
-    def get_own_data_since(self, since_timestamp: int, until_timestamp: int) -> List[Dict[str, Any]]:
-        return self.get_node_data_in_range(self.get_my_node_id(), since_timestamp, until_timestamp)
+    def get_own_data_since(self, since_timestamp: int, until_timestamp: Optional[int] = None) -> List[Dict[str, Any]]:
+        """
+        Gets this node's location data since a timestamp.
+        If until_timestamp is None, defaults to current time.
+        """
+        if until_timestamp is None:
+            until_timestamp = int(datetime.now(timezone.utc).timestamp() * 1000)
+        
+        node_id = self.get_my_node_id()
+        reports = self.location_service.get_locations_in_range(node_id, since_timestamp, until_timestamp)
+        return [report.to_dict() for report in reports]
 
-    def get_node_data_in_range(self, node_id: str, since_timestamp: int, until_timestamp: int) -> List[Dict[str, Any]]:
-       
-        try:
-            conn = sqlite3.connect(self.db_path)
-            conn.row_factory = sqlite3.Row
-            cursor = conn.cursor()
-            
-           
-            cursor.execute('''
-                SELECT * FROM location_reports
-                WHERE node_id = ? AND created_at > ? AND created_at <= ?
-                ORDER BY created_at ASC
-            ''', (node_id, since_timestamp, until_timestamp))
-            
-            rows = cursor.fetchall()
-            conn.close()
-            
-            # Convert DB rows to LocationReport dataclasses, then to dicts
-            reports = []
-            for row in rows:
-                metadata = {}
-                if row['metadata']:
-                    try:
-                        metadata = json.loads(row['metadata'])
-                    except json.JSONDecodeError:
-                        metadata = {}
-                
-                report = LocationReport(
-                    id=UUID(row['id']),
-                    entity_type=EntityType(row['entity_type']),
-                    entity_id=UUID(row['entity_id']),
-                    node_id=row['node_id'],
-                    position=GeoLocation(
-                        latitude=row['latitude'],
-                        longitude=row['longitude'],
-                        altitude=row['altitude'],
-                        accuracy=row['accuracy']
-                    ),
-                    created_at=row['created_at'],
-                    metadata=metadata
-                )
-                reports.append(report.to_dict())
-            
-            return reports
-            
-        except Exception as e:
-            print(f"SyncService: Error getting own data: {e}")
-            return []
-    
-    def get_node_data_in_range(self, node_id: str, from_timestamp: int) -> List[Dict[str, Any]]:
-        """
-        Gets location data for a specific node that is newer than the timestamp.
-        Queries the database for location_reports where node_id matches and created_at > from_timestamp.
-        """
-        try:
-            conn = sqlite3.connect(self.db_path)
-            conn.row_factory = sqlite3.Row
-            cursor = conn.cursor()
-            
-            cursor.execute('''
-                SELECT * FROM location_reports
-                WHERE node_id = ? AND created_at > ?
-                ORDER BY created_at ASC
-            ''', (node_id, from_timestamp))
-            
-            rows = cursor.fetchall()
-            conn.close()
-            
-            # Convert DB rows to LocationReport dataclasses, then to dicts
-            reports = []
-            for row in rows:
-                metadata = {}
-                if row['metadata']:
-                    try:
-                        metadata = json.loads(row['metadata'])
-                    except json.JSONDecodeError:
-                        metadata = {}
-                
-                report = LocationReport(
-                    id=UUID(row['id']),
-                    entity_type=EntityType(row['entity_type']),
-                    entity_id=UUID(row['entity_id']),
-                    node_id=row['node_id'],
-                    position=GeoLocation(
-                        latitude=row['latitude'],
-                        longitude=row['longitude'],
-                        altitude=row['altitude'],
-                        accuracy=row['accuracy']
-                    ),
-                    created_at=row['created_at'],
-                    metadata=metadata
-                )
-                reports.append(report.to_dict())
-            
-            return reports
-            
-        except sqlite3.Error as e:
-            print(f"SyncService: Database error getting node data: {type(e).__name__}: {e}")
-            return []
-        except Exception as e:
-            print(f"SyncService: Error getting node data: {type(e).__name__}: {e}")
-            return []
     
     def sync_with_all_peers(self):
         """
@@ -492,9 +393,10 @@ class SyncService:
                 # Get sync times for this peer
                 forward_sync_at, backward_sync_at = self.get_last_sync_times(peer_mac)
                 
-                # Forward sync: from (forward_sync_at + 30min) to now
+                # Forward sync: Get new data from last_forward_sync_at to now (in 30min chunks)
+                # We sync 30 minutes at a time to avoid pulling too much data at once
                 forward_from: int = forward_sync_at
-                forward_until: int = forward_from + thirty_minutes_ms
+                forward_until: int = min(forward_from + thirty_minutes_ms, now_ms)
                 forward_data: List[LocationReport] = self.pull_data_from_peer(peer_ip, forward_from, forward_until)
                 
                 # Save forward sync data and find latest created_at
@@ -504,11 +406,12 @@ class SyncService:
                     
                     # Find latest created_at in forward data
                     for report in forward_data:
-                        created_at = report.get('created_at', 0)
+                        created_at = report.created_at
                         if created_at > forward_latest:
                             forward_latest = created_at
                 
-                # Backward sync: from (backward_sync_at - 30min) to backward_sync_at
+                # Backward sync: Get old data from (backward_sync_at - 30min) to backward_sync_at
+                # This fills gaps in historical data
                 backward_from = max(0, backward_sync_at - thirty_minutes_ms)
                 backward_data: List[LocationReport] = self.pull_data_from_peer(peer_ip, backward_from, backward_sync_at)
                 
@@ -519,7 +422,7 @@ class SyncService:
                     
                     # Find oldest created_at in backward data
                     for report in backward_data:
-                        created_at = report.get('created_at', 0)
+                        created_at = report.created_at
                         if created_at < backward_oldest or backward_oldest == backward_sync_at:
                             backward_oldest = created_at
                 

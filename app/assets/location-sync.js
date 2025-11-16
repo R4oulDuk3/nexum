@@ -36,7 +36,7 @@ export async function fetchNodeList() {
 export async function fetchNodeData(nodeId, sinceTimestamp, untilTimestamp) {
     try {
         const until = untilTimestamp !== undefined ? untilTimestamp : Date.now();
-        const response = await SyncService.getApiSyncNodeData(nodeId, sinceTimestamp, until);
+        const response = await SyncService.getApiSyncNodeFromTo(nodeId, sinceTimestamp, until);
         return response.data || [];
     } catch (error) {
         console.error(`Error fetching data from node ${nodeId}:`, error);
